@@ -30,8 +30,10 @@ void app_main(void)
         pSettings = useDefaultSettings();
     }
 
-    // Initialize the Wifi
+    // Initialize the Wifi and Espnow
     wifiInit();
+    espNowInit();
+
 
     /*Repl startup menu*/
     repl(pSettings);
