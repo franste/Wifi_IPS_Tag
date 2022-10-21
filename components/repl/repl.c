@@ -8,6 +8,7 @@
 #include "cmd_system.h"
 #include "cJSON.h"
 #include "argtable3/argtable3.h"
+#include "esp_mac.h"
 
 
 // Global variables
@@ -24,7 +25,7 @@ static deviceName_arg_t deviceName_args;
 //Prints device information
 void deviceInfo(void)
 {
-      printf("\nWifi Indoor Positioning Tag\nRunning on ");
+    printf("\nWifi Indoor Positioning Tag\nRunning on ");
 
     /* Print chip information */
     esp_chip_info_t chip_info;
@@ -46,6 +47,15 @@ void deviceInfo(void)
            (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded" : "external");
 
     printf("Minimum free heap size: %ld bytes\n", esp_get_minimum_free_heap_size());
+    
+    uint8_t mac[6];
+    esp_err_t err = esp_base_mac_addr_get(mac);
+    if (err == ESP_OK) {
+        printf("MAC address: %02x:%02x:%02x:%02x:%02x:%02x\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    }
+    else {
+        printf("Failed to get MAC address\n");
+    }
     fflush(stdout);
 }
 

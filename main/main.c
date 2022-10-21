@@ -3,7 +3,9 @@
 #include "repl.h"
 #include "cJSON.h"
 #include "esp_system.h"
-#include "tagWifi.h"
+#include "wifiSTA.h"
+#include "espnow.h"
+//#include "espnow_example.h"
 
 // Default settings for the device
 static cJSON* useDefaultSettings(void) {
@@ -30,9 +32,12 @@ void app_main(void)
         pSettings = useDefaultSettings();
     }
 
-    // Initialize the Wifi and Espnow
-    wifiInit();
-    espNowInit();
+    // Initialize the Wifi
+    wifiStaInit();
+    
+    wifiScanAP();
+    //err = espNowInit();
+    //if (err != ESP_OK) printf("Espnow failed to initialize");
 
 
     /*Repl startup menu*/

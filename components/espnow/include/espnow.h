@@ -1,8 +1,13 @@
 #ifndef TAG_WIFI_H
 #define TAG_WIFI_H
 
+#include <stdlib.h>
 #include "esp_err.h"
 #include "esp_now.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* ESPNOW can work in both station and softap mode. It is configured in menuconfig. */
 #if CONFIG_ESPNOW_WIFI_MODE_STATION
@@ -74,7 +79,6 @@ typedef struct {
     uint8_t dest_mac[ESP_NOW_ETH_ALEN];   //MAC address of destination device.
 } espnow_send_param_t;
 
-void wifiInit(void);
 esp_err_t espNowInit(void);
 
 #endif
