@@ -33,15 +33,22 @@ void app_main(void)
     }
 
     // Initialize the Wifi
+    //wifiSettings(pSettings);
     wifiStaInit();
+    wifi_csi_init();
+    err = wifiScanAllChannels();
+    err = wifiScanActiveChannels();
+    printf("wifiScanActiveChannelscode: %d\n", err);
     
-    wifiScanAP();
+    //wifiScanAP();
     //err = espNowInit();
     //if (err != ESP_OK) printf("Espnow failed to initialize");
+    //espNowSendBroadcast();
+
 
 
     /*Repl startup menu*/
-    repl(pSettings);
+   //repl(pSettings);
 
     /* Load settings from anchor*/
 

@@ -48,15 +48,6 @@ void deviceInfo(void)
 
     printf("Minimum free heap size: %ld bytes\n", esp_get_minimum_free_heap_size());
     
-    uint8_t mac[6];
-    esp_err_t err = esp_base_mac_addr_get(mac);
-    if (err == ESP_OK) {
-        printf("MAC address: %02x:%02x:%02x:%02x:%02x:%02x\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    }
-    else {
-        printf("Failed to get MAC address\n");
-    }
-    fflush(stdout);
 }
 
 static int print_settings(int argc, char **argv)

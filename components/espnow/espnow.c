@@ -26,6 +26,7 @@ static QueueHandle_t s_espnow_queue;
 static uint8_t s_broadcast_mac[ESP_NOW_ETH_ALEN] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 static uint16_t s_espnow_seq[ESPNOW_DATA_MAX] = { 0, 0 };
 static void espNowDeInit(espnow_send_param_t *send_param);
+static espnow_send_param_t *send_param;
 
 
 static void espNowDeInit(espnow_send_param_t *send_param)
@@ -38,6 +39,8 @@ static void espNowDeInit(espnow_send_param_t *send_param)
 
 static void espNowSendCb(const uint8_t *mac_addr, esp_now_send_status_t status)
 {
+    printf("espNowSendCb\n");
+
     espnow_event_t evt;
     espnow_event_send_cb_t *send_cb = &evt.info.send_cb;
 
@@ -56,6 +59,7 @@ static void espNowSendCb(const uint8_t *mac_addr, esp_now_send_status_t status)
 
 static void espNowRecvCb(const uint8_t *mac_addr, const uint8_t *data, int len)
 {
+    printf("espNowRecvCb\n");
     espnow_event_t evt;
     espnow_event_recv_cb_t *recv_cb = &evt.info.recv_cb;
 
@@ -129,15 +133,13 @@ static void espNowTask(void *pvParameter)
     bool is_broadcast = false;
     int ret;
 
-    printf("**********Before*************\n");
-    vTaskDelay(5000 / portTICK_PERIOD_MS);
+    vTaskDelay(10000 / portTICK_PERIOD_MS);
     ESP_LOGI(TAG, "Start sending broadcast data");
+    printf("New task\n");
 
-    printf("*********Middle**************\n");
-    fflush(stdout);
+    
     /* Start sending broadcast ESPNOW data. */
     espnow_send_param_t *send_param = (espnow_send_param_t *)pvParameter;
-    printf("*********After***************\n");
 
     if (esp_now_send(send_param->dest_mac, send_param->buffer, send_param->len) != ESP_OK) {
         ESP_LOGE(TAG, "Send error");
@@ -171,8 +173,10 @@ static void espNowTask(void *pvParameter)
                 if (send_param->delay > 0) {
                     vTaskDelay(send_param->delay/portTICK_PERIOD_MS);
                 }
+                uint8_t source_mac[6];
+                esp_wifi_get_mac(ESP_IF_WIFI_STA, source_mac);
 
-                ESP_LOGI(TAG, "send data to "MACSTR"", MAC2STR(send_cb->mac_addr));
+                ESP_LOGI(TAG, "send data to "MACSTR" from "MACSTR"", MAC2STR(send_cb->mac_addr), MAC2STR(source_mac));
 
                 memcpy(send_param->dest_mac, send_cb->mac_addr, ESP_NOW_ETH_ALEN);
                 espNowDataPrepare(send_param);
@@ -263,9 +267,33 @@ static void espNowTask(void *pvParameter)
     }
 }
 
+esp_err_t espNowSendBroadcast()
+{
+    
+    send_param->unicast = false;
+    send_param->broadcast = true;
+    send_param->state = 0;
+    send_param->magic = esp_random();
+    send_param->count = CONFIG_ESPNOW_SEND_COUNT;
+    send_param->delay = CONFIG_ESPNOW_SEND_DELAY;
+    send_param->len = CONFIG_ESPNOW_SEND_LEN;
+    send_param->buffer = malloc(CONFIG_ESPNOW_SEND_LEN);
+    if (send_param->buffer == NULL) {
+        ESP_LOGE(TAG, "Malloc send buffer fail");
+        free(send_param);
+        vSemaphoreDelete(s_espnow_queue);
+        esp_now_deinit();
+        return ESP_FAIL;
+    }
+    memcpy(send_param->dest_mac, s_broadcast_mac, ESP_NOW_ETH_ALEN);
+    espNowDataPrepare(send_param);
+    xTaskCreate(espNowTask, "espnow_task", 4096, send_param, 4, NULL);
+    return ESP_OK;
+}
+
+
 esp_err_t espNowInit(void)
 {
-    espnow_send_param_t *send_param;
 
     s_espnow_queue = xQueueCreate(ESPNOW_QUEUE_SIZE, sizeof(espnow_event_t));
     if (s_espnow_queue == NULL) {
@@ -308,6 +336,7 @@ esp_err_t espNowInit(void)
         return ESP_FAIL;
     }
     memset(send_param, 0, sizeof(espnow_send_param_t));
+    /*
     send_param->unicast = false;
     send_param->broadcast = true;
     send_param->state = 0;
@@ -322,9 +351,9 @@ esp_err_t espNowInit(void)
         vSemaphoreDelete(s_espnow_queue);
         esp_now_deinit();
         return ESP_FAIL;
-    }
-    memcpy(send_param->dest_mac, s_broadcast_mac, ESP_NOW_ETH_ALEN);
-    espNowDataPrepare(send_param);
+    } */
+    //memcpy(send_param->dest_mac, s_broadcast_mac, ESP_NOW_ETH_ALEN);
+    //espNowDataPrepare(send_param);
 
     printf("********Create Task************\n");
     xTaskCreate(espNowTask, "espnow_task", 4096, send_param, 4, NULL);
