@@ -76,6 +76,7 @@ esp_err_t wifiScanActiveChannels() {
 
 esp_err_t wifiScanAllChannels()
 {
+    int64_t start = esp_timer_get_time();
     wifi_scan_config_t scan_config = scanALl_config;
     if (ESP_OK != esp_wifi_scan_start(&scan_config, true)) {
         ESP_LOGI(TAG_STA, "Failed to perform scan");
@@ -118,6 +119,13 @@ esp_err_t wifiScanAllChannels()
             }
         }
         scanResult.uniqueChannelCount = counter;
+
+        // Print log for how long time it took to scan all channels.
+        ESP_LOGI(
+            TAG_STA, 
+            "Scan All completed, found %d APs on %d channels, scantime %lld ms",
+            scanResult.numOfScannedAP, scanResult.uniqueChannelCount, (esp_timer_get_time() - start) / 1000);
+        
         return ESP_OK;
     }
     return ESP_FAIL;

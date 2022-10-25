@@ -35,7 +35,7 @@ void app_main(void)
     // Initialize the Wifi
     //wifiSettings(pSettings);
     wifiStaInit();
-    wifi_csi_init();
+    //wifi_csi_init();
     err = wifiScanAllChannels();
     err = wifiScanActiveChannels();
     printf("wifiScanActiveChannelscode: %d\n", err);
@@ -48,7 +48,7 @@ void app_main(void)
 
 
     /*Repl startup menu*/
-   //repl(pSettings);
+    //repl(pSettings);
 
     /* Load settings from anchor*/
 
