@@ -1,7 +1,7 @@
 #ifndef FTM_H
 #define FTM_H
 
-
+#include "esp_err.h"
 // typedef struct {
 //     struct arg_str *ssid;
 //     struct arg_str *password;
@@ -34,6 +34,7 @@
 
 int ftm(wifi_ap_record_t *ftmAP);
 void ftmTest(wifi_ap_record_t *ftmAP);
+esp_err_t ftmInit(void);
 
 
 #endif

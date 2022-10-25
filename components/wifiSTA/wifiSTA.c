@@ -73,6 +73,7 @@ esp_err_t wifiScanActiveChannels() {
             wifi_ap_record_t *ftmAP;
             ftmAP = (scanResult.scannedApList +i);
             ftm(ftmAP);
+            //free(ftmAP);
 
 
         } 

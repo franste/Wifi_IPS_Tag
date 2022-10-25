@@ -4,6 +4,7 @@
 #include "cJSON.h"
 #include "esp_system.h"
 #include "wifiSTA.h"
+#include "ftm.h"
 #include "espnow.h"
 //#include "espnow_example.h"
 
@@ -35,6 +36,8 @@ void app_main(void)
     // Initialize the Wifi
     //wifiSettings(pSettings);
     wifiStaInit();
+    ESP_ERROR_CHECK(ftmInit());
+
     //wifi_csi_init();
     err = wifiScanAllChannels();
     err = wifiScanActiveChannels();

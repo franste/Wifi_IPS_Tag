@@ -26,7 +26,7 @@ static const char *TAG_STA = "ftm_station";
 
 static EventGroupHandle_t s_wifi_event_group;
 static const int CONNECTED_BIT = BIT0;
-//static const int DISCONNECTED_BIT = BIT1;
+static const int DISCONNECTED_BIT = BIT1;
 
 static EventGroupHandle_t s_ftm_event_group;
 static const int FTM_REPORT_BIT = BIT0;
@@ -52,6 +52,50 @@ const int g_report_lvl =
     BIT3 |
 #endif
 0;
+
+static void ftmEventHandler(void *arg, esp_event_base_t event_base,
+                          int32_t event_id, void *event_data)
+{
+	if (event_id == WIFI_EVENT_STA_CONNECTED) {
+        wifi_event_sta_connected_t *event = (wifi_event_sta_connected_t *)event_data;
+
+        ESP_LOGI(TAG_STA, "Connected to %s (BSSID: "MACSTR", Channel: %d)", event->ssid,
+                 MAC2STR(event->bssid), event->channel);
+
+        //memcpy(s_ap_bssid, event->bssid, ETH_ALEN);
+        //s_ap_channel = event->channel;
+        xEventGroupClearBits(s_wifi_event_group, DISCONNECTED_BIT);
+        xEventGroupSetBits(s_wifi_event_group, CONNECTED_BIT);
+    } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        // if (s_reconnect && ++s_retry_num < MAX_CONNECT_RETRY_ATTEMPTS) {
+        //     ESP_LOGI(TAG_STA, "sta disconnect, retry attempt %d...", s_retry_num);
+        //     esp_wifi_connect();
+        // } else {
+        //     ESP_LOGI(TAG_STA, "ftmEventHndler - sta disconnected");
+        // }
+        ESP_LOGI(TAG_STA, "ftmEventHndler - sta disconnected");
+        xEventGroupClearBits(s_wifi_event_group, CONNECTED_BIT);
+        xEventGroupSetBits(s_wifi_event_group, DISCONNECTED_BIT);
+    } else if (event_id == WIFI_EVENT_FTM_REPORT) {
+        wifi_event_ftm_report_t *event = (wifi_event_ftm_report_t *) event_data;
+
+        if (event->status == FTM_STATUS_SUCCESS) {
+            s_rtt_est = event->rtt_est;
+            s_dist_est = event->dist_est;
+            s_ftm_report = event->ftm_report_data;
+            s_ftm_report_num_entries = event->ftm_report_num_entries;
+            xEventGroupSetBits(s_ftm_event_group, FTM_REPORT_BIT);
+        } else {
+            ESP_LOGI(TAG_STA, "FTM procedure with Peer("MACSTR") failed! (Status - %d)",
+                     MAC2STR(event->peer_mac), event->status);
+            xEventGroupSetBits(s_ftm_event_group, FTM_FAILURE_BIT);
+        }
+    // } else if (event_id == WIFI_EVENT_AP_START) {
+    //     s_ap_started = true;
+    // } else if (event_id == WIFI_EVENT_AP_STOP) {
+    //     s_ap_started = false;
+     }
+}
 
 static void ftm_process_report(void)
 {
@@ -106,14 +150,11 @@ int ftm(wifi_ap_record_t * ftmAP)
         .frm_count = 32,
         .burst_period = 2,
     };
+    //ESP_LOGE(TAG_STA, "========Before crash============");
     bits = xEventGroupWaitBits(s_wifi_event_group, CONNECTED_BIT, 0, 1, 0);
-    ESP_LOGE(TAG_STA, "========Before crash============");
-    //memcpy(ftmi_cfg.resp_mac, ftmAP->bssid, ETH_ALEN);
-    for (int i = 0; i < ETH_ALEN; i++) {
-        printf("\nBSSID: ", ftmAP->bssid[i]);
-    }
-    ESP_LOGE(TAG_STA, "==========Did it Crash ===========");
-    return 0;
+    //ESP_LOGE(TAG_STA, "========Before crash============");
+    memcpy(ftmi_cfg.resp_mac, ftmAP->bssid, ETH_ALEN);
+    //ESP_LOGE(TAG_STA, "==========Did it Crash ===========");
     ftmi_cfg.channel = ftmAP->primary;
 
     ESP_LOGI(TAG_STA, "Requesting FTM session with Frm Count - %d, Burst Period - %dmSec (0: No Preference)",
@@ -139,4 +180,10 @@ int ftm(wifi_ap_record_t * ftmAP)
     }
 
     return 0;
+}
+esp_err_t ftmInit() {
+    s_wifi_event_group = xEventGroupCreate();
+    s_ftm_event_group = xEventGroupCreate();
+    esp_event_handler_instance_t instance_any_id;
+    return esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &ftmEventHandler, NULL,&instance_any_id);
 }
