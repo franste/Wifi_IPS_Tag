@@ -10,6 +10,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "rom/ets_sys.h"
+#include "ftm.h"
 
 static const uint8_t CONFIG_CSI_SEND_MAC[] = {0x1a, 0x00, 0x00, 0x00, 0x00, 0x00};
 static const char *TAG = "csi_recv";
@@ -59,14 +60,25 @@ esp_err_t wifiScanActiveChannels() {
         ESP_LOGI(TAG_STA, "Found %d APs on channel %d\n", numAP, scan_config.channel);
     }
     int ftm_responders = 0;
-    for (int i = 0; i < scanResult.numOfScannedAP; i++)
+    for (int i = 0; i < scanResult.numOfScannedAP; i++) {
+        ESP_LOGI(TAG_STA, "SSID: %s, RSSI: %d, MAC: "MACSTR", Channel: %d, FTM: %d",
+            scanResult.scannedApList[i].ssid,
+            scanResult.scannedApList[i].rssi,
+            MAC2STR(scanResult.scannedApList[i].bssid),
+            scanResult.scannedApList[i].primary,
+            scanResult.scannedApList[i].ftm_responder
+        );
         if (scanResult.scannedApList[i].ftm_responder == 1) {
-            //create FTM session task
             ftm_responders++;
+            wifi_ap_record_t *ftmAP;
+            ftmAP = (scanResult.scannedApList +i);
+            ftm(ftmAP);
 
-        }       
+
+        } 
+    }      
     if (ftm_responders < 3) {
-        ESP_LOGE(TAG_STA, "Not enough FTM responders found");
+        ESP_LOGE(TAG_STA, "Not enough FTM responders found, found only %d responders", ftm_responders);
         return ESP_ERR_NOT_FOUND;
     }
     return ESP_OK;

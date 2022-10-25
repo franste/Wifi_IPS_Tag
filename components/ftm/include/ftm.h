@@ -33,5 +33,7 @@
 // static wifi_ftm_args_t ftm_args;
 
 int ftm(wifi_ap_record_t *ftmAP);
+void ftmTest(wifi_ap_record_t *ftmAP);
+
 
 #endif

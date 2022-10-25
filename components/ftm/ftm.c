@@ -94,16 +94,26 @@ static void ftm_process_report(void)
     }
     free(log);
 }
+void ftmTest(wifi_ap_record_t * ftmAP){
+    printf("FTM Test %s \n", ftmAP->ssid);
+    fflush(stdout);
+}
 
-int ftm(wifi_ap_record_t *ftmAP)
-{
+int ftm(wifi_ap_record_t * ftmAP)
+{   
     EventBits_t bits;
     wifi_ftm_initiator_cfg_t ftmi_cfg = {
         .frm_count = 32,
         .burst_period = 2,
     };
     bits = xEventGroupWaitBits(s_wifi_event_group, CONNECTED_BIT, 0, 1, 0);
-    memcpy(ftmi_cfg.resp_mac, ftmAP->bssid, ETH_ALEN);
+    ESP_LOGE(TAG_STA, "========Before crash============");
+    //memcpy(ftmi_cfg.resp_mac, ftmAP->bssid, ETH_ALEN);
+    for (int i = 0; i < ETH_ALEN; i++) {
+        printf("\nBSSID: ", ftmAP->bssid[i]);
+    }
+    ESP_LOGE(TAG_STA, "==========Did it Crash ===========");
+    return 0;
     ftmi_cfg.channel = ftmAP->primary;
 
     ESP_LOGI(TAG_STA, "Requesting FTM session with Frm Count - %d, Burst Period - %dmSec (0: No Preference)",
