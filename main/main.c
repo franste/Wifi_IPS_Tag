@@ -35,13 +35,13 @@ void app_main(void)
 
     // Initialize the Wifi
     //wifiSettings(pSettings);
-    wifiStaInit();
+    ESP_ERROR_CHECK(wifiStaInit());
     ESP_ERROR_CHECK(ftmInit());
 
     //wifi_csi_init();
-    err = wifiScanAllChannels();
-    err = wifiScanActiveChannels();
-    printf("wifiScanActiveChannelscode: %d\n", err);
+    wifiScanAllChannels();
+    wifiScanActiveChannels();
+    
     
     //wifiScanAP();
     //err = espNowInit();

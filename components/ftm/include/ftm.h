@@ -32,8 +32,15 @@
 // static wifi_scan_arg_t scan_args;
 // static wifi_ftm_args_t ftm_args;
 
-int ftm(wifi_ap_record_t *ftmAP);
-void ftmTest(wifi_ap_record_t *ftmAP);
+typedef struct {
+    int avg_rtt_raw;   /**< Raw average Round-Trip-Time with peer in Nano-Seconds */
+    int min_rtt_raw;   /**< Raw average Round-Trip-Time with peer in Nano-Seconds */
+    int avg_RSSI;
+    int rtt_est;       /**< Estimated Round-Trip-Time with peer in Nano-Seconds */
+    int dist_est; 
+} ftmResult_t;
+
+ftmResult_t* ftm(wifi_ap_record_t *ftmAP);
 esp_err_t ftmInit(void);
 
 

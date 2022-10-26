@@ -13,7 +13,7 @@ typedef struct {
 } scanResult_t;
 
 
-void wifiStaInit();
+esp_err_t wifiStaInit();
 esp_err_t wifiScanAllChannels();
 esp_err_t wifiScanActiveChannels();
 void wifi_csi_init();

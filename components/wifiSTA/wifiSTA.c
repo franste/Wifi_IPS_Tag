@@ -42,10 +42,10 @@ esp_err_t wifiScanActiveChannels() {
         ESP_ERROR_CHECK(esp_wifi_scan_get_ap_num(&numAP));
 
         if (scanResult.scannedApList == NULL) {
-            ESP_LOGI(TAG_STA, "Allocating memory malloc");
+            //ESP_LOGI(TAG_STA, "Allocating memory malloc");
             scanResult.scannedApList = malloc(numAP * sizeof(wifi_ap_record_t));
         } else {
-            ESP_LOGI(TAG_STA, "Allocating memory realloc");
+            //ESP_LOGI(TAG_STA, "Allocating memory realloc");
             scanResult.scannedApList = realloc(
                 scanResult.scannedApList,
                 (scanResult.numOfScannedAP + numAP) * sizeof(wifi_ap_record_t)
@@ -57,25 +57,34 @@ esp_err_t wifiScanActiveChannels() {
         }
         ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&numAP, (wifi_ap_record_t *)(scanResult.scannedApList + scanResult.numOfScannedAP)));
         scanResult.numOfScannedAP += numAP;
-        ESP_LOGI(TAG_STA, "Found %d APs on channel %d\n", numAP, scan_config.channel);
+        //ESP_LOGI(TAG_STA, "Found %d APs on channel %d\n", numAP, scan_config.channel);
     }
     int ftm_responders = 0;
     for (int i = 0; i < scanResult.numOfScannedAP; i++) {
-        ESP_LOGI(TAG_STA, "SSID: %s, RSSI: %d, MAC: "MACSTR", Channel: %d, FTM: %d",
-            scanResult.scannedApList[i].ssid,
-            scanResult.scannedApList[i].rssi,
-            MAC2STR(scanResult.scannedApList[i].bssid),
-            scanResult.scannedApList[i].primary,
-            scanResult.scannedApList[i].ftm_responder
-        );
         if (scanResult.scannedApList[i].ftm_responder == 1) {
             ftm_responders++;
-            wifi_ap_record_t *ftmAP;
-            ftmAP = (scanResult.scannedApList +i);
-            ftm(ftmAP);
-            //free(ftmAP);
+            wifi_ap_record_t *pFtmAP;
+            pFtmAP = (scanResult.scannedApList +i);
+            ftmResult_t *pFtmResult;
+            pFtmResult= ftm(pFtmAP);
 
+            // Scan log for FTM Responders
+            ESP_LOGI(TAG_STA, "SSID: %s, RSSI: %d, MAC: "MACSTR", Channel: %d, FTM: %d",
+                scanResult.scannedApList[i].ssid,
+                scanResult.scannedApList[i].rssi,
+                MAC2STR(scanResult.scannedApList[i].bssid),
+                scanResult.scannedApList[i].primary,
+                scanResult.scannedApList[i].ftm_responder
+            );
 
+            ESP_LOGI(TAG_STA, "FTM avg_RSSI: %d, avg_rtt_raw: %d, min_rtt_raw: %d, rtt_est: %d, dist_est: %d cm ", 
+                pFtmResult->avg_RSSI, pFtmResult->avg_rtt_raw, pFtmResult->min_rtt_raw, pFtmResult->rtt_est, pFtmResult->dist_est
+            );
+
+            vTaskDelay(10 / portTICK_PERIOD_MS);
+            
+            //free(pFtmAP);
+            //free(pFtmResult);
         } 
     }      
     if (ftm_responders < 3) {
@@ -89,7 +98,7 @@ esp_err_t wifiScanActiveChannels() {
 
 esp_err_t wifiScanAllChannels()
 {
-    int64_t start = esp_timer_get_time();
+    //int64_t start = esp_timer_get_time();
     wifi_scan_config_t scan_config = scanALl_config;
     if (ESP_OK != esp_wifi_scan_start(&scan_config, true)) {
         ESP_LOGI(TAG_STA, "Failed to perform scan");
@@ -112,7 +121,7 @@ esp_err_t wifiScanAllChannels()
     scanResult.uniqueChannels = malloc(scanResult.numOfScannedAP * sizeof(uint16_t));
     if (scanResult.scannedApList == NULL || scanResult.uniqueChannels == NULL) {
         ESP_LOGE(TAG_STA, "Failed to malloc buffer for scan results");
-        return ESP_FAIL;
+        return ESP_ERR_NO_MEM;
     }
 
     if (esp_wifi_scan_get_ap_records(
@@ -134,10 +143,10 @@ esp_err_t wifiScanAllChannels()
         scanResult.uniqueChannelCount = counter;
 
         // Print log for how long time it took to scan all channels.
-        ESP_LOGI(
-            TAG_STA, 
-            "Scan All completed, found %d APs on %d channels, scantime %lld ms",
-            scanResult.numOfScannedAP, scanResult.uniqueChannelCount, (esp_timer_get_time() - start) / 1000);
+        // ESP_LOGI(
+        //     TAG_STA, 
+        //     "Scan All completed, found %d APs on %d channels, scantime %lld ms",
+        //     scanResult.numOfScannedAP, scanResult.uniqueChannelCount, (esp_timer_get_time() - start) / 1000);
         
         return ESP_OK;
     }
@@ -201,13 +210,13 @@ void wifi_csi_init()
 }
 
 
-void wifiStaInit(void)
+esp_err_t wifiStaInit(void)
 {
     const char *country = "SE";
     esp_log_level_set("wifi", ESP_LOG_WARN);
 	static bool initialized = false;
 	if (initialized) {
-		return;
+		return ESP_OK;
 	}
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -217,11 +226,13 @@ void wifiStaInit(void)
     ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_STA) );
     ESP_ERROR_CHECK( esp_wifi_set_protocol(ESP_IF_WIFI_STA, WIFI_PROTOCOL_LR) );
     ESP_ERROR_CHECK( esp_wifi_set_country_code(country, true) );
+    //ESP_ERROR_CHECK( esp_wifi_set_bandwidth(WIFI_MODE_STA, ) );
     ESP_ERROR_CHECK( esp_wifi_start());
 
 //#if CONFIG_ESPNOW_ENABLE_LONG_RANGE
 //    ESP_ERROR_CHECK( esp_wifi_set_protocol(ESPNOW_WIFI_IF, WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N|WIFI_PROTOCOL_LR) );
 //#endif
     initialized = true;
+    return ESP_OK;
 }
 
