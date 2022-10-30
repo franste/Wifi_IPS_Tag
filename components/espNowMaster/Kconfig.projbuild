@@ -40,7 +40,7 @@ menu "Tag Wifi Configuration"
 
     config ESPNOW_SEND_DELAY
         int "Send delay"
-        default 1000
+        default 50
         range 0 65535
         help
             Delay between sending two ESPNOW data, unit: ms.

@@ -1,0 +1,14 @@
+menu "Application WiFi Configuration"
+    config STA_WIFI_SSID
+        string "STA WiFi SSID"
+        default "WIP"
+        help
+            SSID of the WiFi network to connect to.
+
+    config STA_WIFI_PASSWORD
+        string "STA WiFi Password"
+        default "ap-12345678"
+        help
+            Password of the WiFi network to connect to.  
+endmenu                  
+            

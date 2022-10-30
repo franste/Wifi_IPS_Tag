@@ -3,6 +3,7 @@
 
 #include "esp_err.h"
 
+
 enum DEFAULT_SETTINGS {
     DEFAULT_WIFI_SCAN_TIME_ACTIVE_MIN = 30,
     DEFAULT_WIFI_SCAN_TIME_ACTIVE_MAX = 40,     
