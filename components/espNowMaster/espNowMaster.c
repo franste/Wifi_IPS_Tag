@@ -15,7 +15,8 @@
 #include "esp_crc.h"
 
 
-#define ESPNOW_MAXDELAY 512
+#define ESPNOW_MAXDELAY 512 // Maximum delay in ms between packets
+#define ESPNOW_MAX_PAYLOAD 240 // Maximum size of a payload
 
 static const char *TAG_ESP = "espnow";
 static QueueHandle_t s_espnow_queue;
@@ -123,9 +124,9 @@ static void espnow_task(void *pvParameter)
 
     /* Start sending broadcast ESPNOW data. */
     espnow_send_param_t *send_param = (espnow_send_param_t *)pvParameter;
-    //esp_err_t  err = esp_now_send(send_param->dest_mac, send_param->buffer, send_param->len);
+    esp_err_t  err = esp_now_send(send_param->dest_mac, send_param->buffer, send_param->len);
     char *broadcast = "post";
-    esp_err_t  err = esp_now_send(send_param->dest_mac, (uint8_t*)broadcast, strlen(broadcast));
+    //esp_err_t  err = esp_now_send(send_param->dest_mac, (uint8_t*)broadcast, strlen(broadcast)+sizeof(espnow_data_t));
     if (err != ESP_OK) {
         ESP_LOGE(TAG_ESP, "Send error to: "MACSTR" %s ",MAC2STR(send_param->dest_mac) , esp_err_to_name(err));
         free(send_param->buffer);
@@ -167,12 +168,12 @@ static void espnow_task(void *pvParameter)
                 espnow_data_prepare(send_param);
 
                 /* Send the next data after the previous data is sent. */
-                // if (esp_now_send(send_param->dest_mac, send_param->buffer, send_param->len) != ESP_OK) {
-                //     ESP_LOGE(TAG_ESP, "Send error");
-                //     free(send_param->buffer);
-                //     free(send_param);
-                //     vTaskDelete(NULL);
-                // }
+                if (esp_now_send(send_param->dest_mac, send_param->buffer, send_param->len) != ESP_OK) {
+                     ESP_LOGE(TAG_ESP, "Send error");
+                    free(send_param->buffer);
+                    free(send_param);
+                    vTaskDelete(NULL);
+                }
                 break;
             }
             case ESPNOW_RECV_CB:
@@ -254,8 +255,21 @@ static void espnow_task(void *pvParameter)
         }
     } 
 }
+static uint16_t calcCount(uint32_t len)
+{
+    uint16_t count = 0;
+    if (len % ESPNOW_MAX_PAYLOAD == 0) {
+        count = len / ESPNOW_MAX_PAYLOAD;
+    }
+    else {
+        count = len / ESPNOW_MAX_PAYLOAD + 1;
+    }
+    return count;
+}
 
 esp_err_t espNowSendData(uint8_t channel, uint8_t *data, uint16_t dataLength) { 
+    
+    // Broadcast data to find peers
     esp_now_peer_info_t *broadcast_peer = malloc(sizeof(esp_now_peer_info_t));
     if (broadcast_peer == NULL) {
             ESP_LOGE(TAG_ESP, "Malloc peer information fail");
@@ -280,24 +294,53 @@ esp_err_t espNowSendData(uint8_t channel, uint8_t *data, uint16_t dataLength) {
             return ESP_FAIL;
         }
     }
-    espnow_send_param_t *send_param;
-    send_param = malloc(sizeof(espnow_send_param_t));
-    if (send_param == NULL) {
-        ESP_LOGE(TAG_ESP, "Malloc failed");
+
+    // Create broadcast packet
+    uint16_t count = calcCount(dataLength); // Calculate the number of packets
+    espnow_packet_t *packet;
+    int payloadLength = 0;
+    if (count > 1) {
+        packet = malloc(sizeof(espnow_packet_t) + ESPNOW_MAX_PAYLOAD);
+        payloadLength = ESPNOW_MAX_PAYLOAD;
+    } else {
+        packet = malloc(sizeof(espnow_packet_t) + dataLength); 
+        payloadLength = dataLength;
+    }
+    if (packet == NULL) {
+        ESP_LOGE(TAG_ESP, "Malloc packet information fail");
         return ESP_FAIL;
     }
-    memset(send_param, 0, sizeof(espnow_send_param_t));
-    send_param->unicast = false;
-    send_param->broadcast = true;
-    send_param->state = 0;
-    send_param->magic = esp_random();
-    send_param->count = 0;
-    send_param->delay = 25;
-    send_param->len = dataLength;
-    send_param->buffer = data;
-    memcpy(send_param->dest_mac, s_broadcast_mac, ESP_NOW_ETH_ALEN);
-    espnow_data_prepare(send_param);
-    xTaskCreate(espnow_task, "espnow_task", 4096, send_param, 4, NULL);
+    int packetLength = sizeof(espnow_packet_t) + payloadLength;
+    packet->type = ESPNOW_DATA_BROADCAST;
+    packet->state = 0;
+    packet->seq_num = 0;
+    packet->crc = 0;
+    packet->crc = esp_crc16_le(UINT16_MAX, (uint8_t const *)packet, payloadLength);
+    memcpy(packet->payload, data, payloadLength);
+
+    // Send broadcast packet
+    esp_err_t err = esp_now_send(s_broadcast_mac, packet, packetLength);
+    ESP_LOGI(TAG_ESP, "Send broadcast packet, length: %d, status: %s", packetLength, esp_err_to_name(err));
+    
+    // espnow_send_param_t *send_param;
+    // send_param = malloc(sizeof(espnow_send_param_t));
+    // if (send_param == NULL) {
+    //     ESP_LOGE(TAG_ESP, "Malloc failed");
+    //     return ESP_FAIL;
+    // }
+    // ESP_LOGE(TAG_ESP, "Calc: datalength: %d, calc: %d", dataLength, dataLength % 256);
+    // memset(send_param, 0, sizeof(espnow_send_param_t));
+    // send_param->unicast = false;
+    // send_param->broadcast = true;
+    // send_param->state = 0;
+    // send_param->magic = esp_random();
+    // send_param->count = calcCount(dataLength);
+    // send_param->delay = 25;
+    // send_param->len = dataLength;
+    // send_param->buffer = data;
+    // memcpy(send_param->dest_mac, s_broadcast_mac, ESP_NOW_ETH_ALEN);
+    // espnow_data_prepare(send_param);
+    // xTaskCreate(espnow_task, "espnow_task", 4096, send_param, 4, NULL);
     return ESP_OK;
 }
 

@@ -75,8 +75,9 @@ void app_main(void)
             }
             // Broadcast to get closest ESP-NOW peer (If there is one)
             if (channel != 0) espNowSendData(channel, (uint8_t*)results_json_str, strlen(results_json_str));
-            free(results_json_str);
-            free(result.ftmResultsList);
+            //printf(results_json_str);
+            //free(results_json_str);
+            //free(result.ftmResultsList);
             break;
 
         } else {
