@@ -28,13 +28,20 @@ typedef struct {
     uint16_t numOfResults;
 } result_t;
 
-
+typedef struct {
+    uint8_t bssid[6];
+    uint8_t password[64];
+    uint8_t channel;
+    uint8_t length;
+    uint8_t payload[0];
+} __attribute__((packed)) send_result_param_t;
 
 
 esp_err_t wifiStaInit();
 scanResult_t wifiScanAllChannels();
 scanResult_t wifiScanActiveChannels(scanResult_t scanResult);
 result_t performFTM(scanResult_t scanResult);
+esp_err_t sendToServer(send_result_param_t *send_result_param);
 void wifi_csi_init();
 void syncTime();
 
