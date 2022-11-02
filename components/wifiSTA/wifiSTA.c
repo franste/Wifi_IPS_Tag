@@ -63,34 +63,30 @@ static wifi_config_t wifi_config = {
     },
 };
 
-esp_err_t sendToServer(send_result_param_t *send_result_param)
+void sendToServer(wifi_config_t send_config, char *payload)
 {
-    //ESP_LOGI(TAG_STA, "Sending to server - channel: %d, BSSID: "MACSTR"", send_result_param->channel, MAC2STR(send_result_param->bssid));
-    esp_wifi_set_channel(send_result_param->channel, WIFI_SECOND_CHAN_ABOVE);
-    wifi_config_t send_wifi_config = {
-        .sta = {
-            .password = (uint8_t )send_result_param->password,
-            .bssid_set = 1,
-            .bssid = {send_result_param->bssid[0], send_result_param->bssid[1], send_result_param->bssid[2], send_result_param->bssid[3], send_result_param->bssid[4], send_result_param->bssid[5]},
-            .rm_enabled = 1,
-            .pmf_cfg = {
-                .capable = true,
-                .required = false},
-            .btm_enabled = 1,
-            .mbo_enabled = 1,
-            .ft_enabled = 1,
-        },
-    };
-    esp_wifi_set_config(ESP_IF_WIFI_STA, &send_wifi_config);
-    esp_wifi_connect();
-    xEventGroupWaitBits(s_wifi_event_group,
-            DISCONNECTED_BIT,
+    ESP_LOGI(TAG_STA, "Config "MACSTR" for sending data", MAC2STR(send_config.sta.bssid));
+    esp_wifi_set_config(ESP_IF_WIFI_STA, &send_config);
+    //esp_wifi_connect();
+        esp_err_t err = esp_wifi_connect();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG_STA, "esp_wifi_connect failed: %s", esp_err_to_name(err)); 
+    } else {
+        EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
+            CONNECTED_BIT | DISCONNECTED_BIT,
             pdFALSE,
             pdFALSE,
             portMAX_DELAY);
-    ESP_LOGI(TAG_STA, "Disconnected from AP after sending result");
 
-    return ESP_OK;
+        if (bits & CONNECTED_BIT) {
+            ESP_LOGI(TAG_STA, "Connected to AP "MACSTR" for sending data", MAC2STR(send_config.sta.bssid));
+               
+        }
+    }
+
+    esp_wifi_disconnect();
+    xEventGroupWaitBits(s_wifi_event_group, DISCONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+
 }
 
 static ftmResult_t ftm_process_report(void)
@@ -252,6 +248,7 @@ scanResult_t wifiScanActiveChannels(scanResult_t scanResult)
     }
     return scanResult;
 }
+
 result_t performFTM(scanResult_t scanResult) {
     int ftm_responders = 0;
     result_t result;

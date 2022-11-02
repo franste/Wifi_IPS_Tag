@@ -21,7 +21,7 @@
 // Default settings for the device
 static cJSON* useDefaultSettings(void) {
     cJSON *settings_json = cJSON_CreateObject();
-    cJSON_AddStringToObject(settings_json, "deviceName", "Tag");
+    cJSON_AddStringToObject(settings_json, "SSID", "factorySSID");
     cJSON_AddStringToObject(settings_json, "Wifi_username", "admin");
     cJSON_AddStringToObject(settings_json, "Wifi_password", "password");
     return settings_json;
@@ -65,8 +65,8 @@ void app_main(void)
             result_t result = performFTM(scanResult); // Initiate FTM to all FTM responders in the scan result
             char* results_json_str = result2JsonStr(result); // Convert the results to a JSON string
             
-            send_result_param_t *send_param = malloc(sizeof(send_result_param_t) + strlen(results_json_str));
-            memcpy(send_param->payload, results_json_str, strlen(results_json_str));
+            //send_result_param_t *send_param = malloc(sizeof(send_result_param_t) + strlen(results_json_str));
+            //memcpy(send_param->payload, results_json_str, strlen(results_json_str));
 
             if (PRODUCTION) { 
                 uint8_t bestRSSI = 0;
@@ -77,20 +77,45 @@ void app_main(void)
                         rssi = result.ftmResultsList[i].rssi;
                         bestRSSI = i;
                     }
-                }       
-                memcpy(send_param->bssid, result.ftmResultsList[bestRSSI].bssid, MAC_ADDRESS_LENGTH);
-                send_param->channel = result.ftmResultsList[bestRSSI].channel;
-                sendToServer(send_param);
+                }
+                // wifi_config_t send_config = {
+                //     .sta = {
+                //         .ssid = pSettings->SSID,
+                //         .password = "password",
+                //         .bssid_set = true,
+                //         .bssid = {result.ftmResultsList[bestRSSI].bssid[0], result.ftmResultsList[bestRSSI].bssid[1], result.ftmResultsList[bestRSSI].bssid[2], result.ftmResultsList[bestRSSI].bssid[3], result.ftmResultsList[bestRSSI].bssid[4], result.ftmResultsList[bestRSSI].bssid[5]},
+                //         .channel = result.ftmResultsList[bestRSSI].channel,
+                //     },
+                // };    
+                //memcpy(send_param->bssid, result.ftmResultsList[bestRSSI].bssid, MAC_ADDRESS_LENGTH);
+                //send_param->channel = result.ftmResultsList[bestRSSI].channel;
+                //sendToServer(send_param);
             }
             // Broadcast to get closest ESP-NOW peer (If there is one)
             else {
                 char mac_str[] = CONFIG_UPLOAD_TO_DEV_AP_MAC;
                 uint8_t mac_addr[MAC_ADDRESS_LENGTH];
                 sscanf(mac_str, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &mac_addr[0], &mac_addr[1], &mac_addr[2], &mac_addr[3], &mac_addr[4], &mac_addr[5]);
-                memcpy(send_param->bssid, mac_addr, MAC_ADDRESS_LENGTH);
-                send_param->channel = (uint8_t) CONFIG_UPLOAD_TO_DEV_AP_Channel;
-                send_param->password = CONFIG_UPLOAD_TO_DEV_AP_PASSWORD;
-                sendToServer(send_param);
+
+                wifi_config_t send_config = {
+                    .sta = {
+                        .ssid = CONFIG_UPLOAD_TO_DEV_AP_SSID,
+                        .password = CONFIG_UPLOAD_TO_DEV_AP_PASSWORD,
+                        .bssid_set = true,
+                        .bssid = {mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]},
+                        .channel = CONFIG_UPLOAD_TO_DEV_AP_Channel
+                    },
+                };
+                sendToServer(send_config, results_json_str);
+
+                // char mac_str[] = CONFIG_UPLOAD_TO_DEV_AP_MAC;
+                // uint8_t mac_addr[MAC_ADDRESS_LENGTH];
+                // sscanf(mac_str, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &mac_addr[0], &mac_addr[1], &mac_addr[2], &mac_addr[3], &mac_addr[4], &mac_addr[5]);
+                // memcpy(send_param->bssid, mac_addr, MAC_ADDRESS_LENGTH);
+                // send_param->ssid = CONFIG_UPLOAD_TO_DEV_AP_SSID;
+                // send_param->channel = (uint8_t) CONFIG_UPLOAD_TO_DEV_AP_Channel;
+                // send_param->password = CONFIG_UPLOAD_TO_DEV_AP_PASSWORD;
+                // sendToServer(send_param);
             }
             //if (channel != 0) espNowSendData(channel, (uint8_t*)results_json_str, strlen(results_json_str));
             //printf(results_json_str);
