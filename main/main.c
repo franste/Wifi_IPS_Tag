@@ -54,7 +54,7 @@ void app_main(void)
     //espNowInit();
 
     // Sync the time with network WIP
-    syncTime();
+    //syncTime();
 
 
     //ESP_ERROR_CHECK(ftmInit());
