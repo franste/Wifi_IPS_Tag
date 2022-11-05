@@ -17,7 +17,7 @@ char* result2JsonStr(result_t results)
     sprintf(macStr, "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     cJSON *results_json = cJSON_CreateObject();
     cJSON_AddStringToObject(results_json, "Device", macStr);
-    cJSON_AddStringToObject(results_json, "Timestamp", esp_log_system_timestamp());
+    //cJSON_AddStringToObject(results_json, "Timestamp", esp_log_system_timestamp());
     cJSON *result_array_json = cJSON_CreateArray();
 
     for (int i = 0; i < results.numOfResults; i++)

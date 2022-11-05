@@ -30,6 +30,31 @@ static cJSON* useDefaultSettings(void) {
     return settings_json;
 }
 
+static void upload_data_to_server(result_t result, char* results_json_str) {
+    // Send the results to the server
+    uint8_t bestRSSI = 0;
+    int8_t rssi = -127;
+    // Find the channel of AP with highest RSSI that has the same SSID as the server network.
+    for (int i = 0; i < result.numOfResults; i++) {
+        if (result.ftmResultsList[i].rssi > rssi && result.ftmResultsList[i].ssid[0] == *server_ap_ssid  ) {
+            rssi = result.ftmResultsList[i].rssi;
+            bestRSSI = i;
+        }
+    }
+
+    // WIFI config for sending to server
+    wifi_config_t send_config = {
+        .sta = {
+            .bssid_set = true,
+            .channel = result.ftmResultsList[bestRSSI].channel,
+        },
+    };    
+    memcpy(send_config.sta.ssid, result.ftmResultsList[bestRSSI].ssid, 32);
+    memcpy(send_config.sta.password, server_ap_password, strlen(server_ap_password));
+    memcpy(send_config.sta.bssid, result.ftmResultsList[bestRSSI].bssid, MAC_ADDRESS_LENGTH);    
+    sendToServer(send_config, server_url, results_json_str);
+}
+
 void app_main(void)
 {
     // Initialize NVS.
@@ -68,31 +93,9 @@ void app_main(void)
             result_t result = performFTM(scanResult); // Initiate FTM to all FTM responders in the scan result
             char* results_json_str = result2JsonStr(result); // Convert the results to a JSON string
             
-            // Send the results to the server
-            uint8_t bestRSSI = 0;
-            int8_t rssi = -127;
-            // Find the channel of AP with highest RSSI that has the same SSID as the server network.
-            for (int i = 0; i < result.numOfResults; i++) {
-                if (result.ftmResultsList[i].rssi > rssi && result.ftmResultsList[i].ssid[0] == *server_ap_ssid  ) {
-                    rssi = result.ftmResultsList[i].rssi;
-                    bestRSSI = i;
-                }
-            }
-
-            // WIFI config for sending to server
-            wifi_config_t send_config = {
-                .sta = {
-                    .bssid_set = true,
-                    .channel = result.ftmResultsList[bestRSSI].channel,
-                },
-            };    
-            memcpy(send_config.sta.ssid, result.ftmResultsList[bestRSSI].ssid, 32);
-            memcpy(send_config.sta.password, server_ap_password, strlen(server_ap_password));
-            memcpy(send_config.sta.bssid, result.ftmResultsList[bestRSSI].bssid, MAC_ADDRESS_LENGTH);
+            // HTTP POST to server
+            upload_data_to_server(result, results_json_str);
             free(result.ftmResultsList);
-
-            
-            sendToServer(send_config, server_url, results_json_str);
             free(results_json_str);
             break;
 
