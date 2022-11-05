@@ -21,6 +21,7 @@ typedef struct {
     uint8_t channel;
     uint8_t bssid[6];                     /**< MAC address of AP */
     int8_t  rssi;                         /**< signal strength of AP */ 
+    uint8_t ssid[32];                     /**< SSID of AP */
 } ftmResult_t;
 
 typedef struct {
@@ -33,7 +34,7 @@ esp_err_t wifiStaInit();
 scanResult_t wifiScanAllChannels();
 scanResult_t wifiScanActiveChannels(scanResult_t scanResult);
 result_t performFTM(scanResult_t scanResult);
-void sendToServer(wifi_config_t send_config, char *payload);
+void sendToServer(wifi_config_t send_config, const char *url, char *payload);
 void wifi_csi_init();
 void syncTime();
 
