@@ -13,6 +13,7 @@
 
 #define PRODUCTION true
 #define MAC_ADDRESS_LENGTH 6
+#define MIN_FTM_RESULTS 0
 
 static const char *server_url = "http://192.168.1.3:8080/post/";
 static const char *server_ap_ssid = "NETGEARREX";
@@ -45,8 +46,16 @@ static void upload_data_to_server(result_t result, char* results_json_str) {
     // WIFI config for sending to server
     wifi_config_t send_config = {
         .sta = {
-            .bssid_set = true,
+            //.bssid_set = true,
             .channel = result.ftmResultsList[bestRSSI].channel,
+            .scan_method = WIFI_FAST_SCAN,
+            .ft_enabled = true,
+            .owe_enabled = true,
+            .mbo_enabled = true,
+            .pmf_cfg = {
+                .capable = true,
+                .required = false
+            },
         },
     };    
     memcpy(send_config.sta.ssid, result.ftmResultsList[bestRSSI].ssid, 32);
@@ -87,7 +96,6 @@ void app_main(void)
     //wifi_csi_init();
     while (true)
     {
-        int start = esp_timer_get_time();
         scanResult_t scanResult = wifiScanAllChannels();
         if (scanResult.numOfScannedAP > 0) {
             result_t result = performFTM(scanResult); // Initiate FTM to all FTM responders in the scan result
@@ -95,28 +103,55 @@ void app_main(void)
             
             // HTTP POST to server
             upload_data_to_server(result, results_json_str);
-            free(result.ftmResultsList);
             free(results_json_str);
-            break;
 
+
+            while (result.numOfFtmResponders + 1 >  MIN_FTM_RESULTS) {
+                int start = esp_timer_get_time();
+                if (result.ftmResultsList != NULL) {
+                    free(result.ftmResultsList);
+                    result.ftmResultsList = NULL;
+                    result.numOfResults = 0;
+                    result.numOfFtmResponders = 0;
+                }
+
+                //free(scanResult.scannedApList);
+                //scanResult.scannedApList = NULL;
+                scanResult = wifiScanActiveChannels(scanResult);
+                if (scanResult.numOfScannedAP > 0) {
+                    result = performFTM(scanResult); // Initiate FTM to all FTM responders in the scan result
+                    results_json_str = result2JsonStr(result); // Convert the results to a JSON string
+                    
+                    // HTTP POST to server
+                    upload_data_to_server(result, results_json_str);
+                    free(results_json_str);;
+                }
+                int end = esp_timer_get_time();
+                int heap = esp_get_free_heap_size();
+                ESP_LOGI("main", "Loop took %d ms heapsize: %d", (end - start) / 1000, heap);
+            }
+            ESP_LOGE("main", "No more FTM results, WIFI scan ALL channels now");
+            if (result.ftmResultsList != NULL) {
+                    free(result.ftmResultsList);
+                    result.ftmResultsList = NULL;
+                    result.numOfResults = 0;
+                    result.numOfFtmResponders = 0;
+            }
         } else {
             ESP_LOGI("main", "No APs found\n");
         }
-        scanResult.numOfScannedAP = 0;
-        free(scanResult.scannedApList);
-        free(scanResult.uniqueChannels);
-        scanResult.scannedApList = NULL;
-        scanResult.uniqueChannels = NULL;
-
-        int end = esp_timer_get_time();
-        int heap = esp_get_free_heap_size();
-        ESP_LOGI("main", "Loop took %d ms heapsize: %d", (end - start) / 1000, heap);
+        if (scanResult.scannedApList != NULL) {
+            free(scanResult.scannedApList);
+            scanResult.scannedApList = NULL;
+            scanResult.numOfScannedAP = 0;
+        }
+        if (scanResult.uniqueChannels != NULL) {
+            free(scanResult.uniqueChannels);
+            scanResult.uniqueChannels = NULL;
+            scanResult.uniqueChannelCount = 0;
+        }
     } 
         ESP_LOGI("main", "End of main");
-    //wifiScanAP();
-    //err = espNowInit();
-    //if (err != ESP_OK) printf("Espnow failed to initialize");
-    //espNowSendBroadcast();
 
 
 

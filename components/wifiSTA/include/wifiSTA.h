@@ -27,6 +27,7 @@ typedef struct {
 typedef struct {
     ftmResult_t *ftmResultsList;
     uint16_t numOfResults;
+    uint16_t numOfFtmResponders;
 } result_t;
 
 

@@ -15,6 +15,7 @@
 #include "esp_sntp.h"
 #include "esp_http_client.h"
 #include "esp_tls.h"
+#include "esp_timer.h"
 
 
 #define MAC_ADDRESS_LENGTH 6
@@ -112,6 +113,8 @@ static ftmResult_t startFtmSession(u_int8_t *bssid, u_int8_t channel)
     ESP_LOGI(TAG_STA, "Requesting FTM session with Frm Count - %d, Burst Period - %dmSec (0: No Preference)",
              ftmi_cfg.frm_count, ftmi_cfg.burst_period * 100);
 
+    esp_wifi_set_channel(ftmi_cfg.channel, WIFI_SECOND_CHAN_ABOVE);
+    esp_wifi_set_bandwidth(ESP_IF_WIFI_STA, WIFI_BW_HT40);
     if (ESP_OK != esp_wifi_ftm_initiate_session(&ftmi_cfg))
     {
         ESP_LOGE(TAG_STA, "Failed to start FTM session");
@@ -183,10 +186,14 @@ static void eventHandler(void *arg, esp_event_base_t event_base,
 }
 
 static void send_http_post(const char *url, char *payload) {
+    int start = esp_timer_get_time();
+
     char output_buffer[MAX_HTTP_OUTPUT_BUFFER] = {0};   // Buffer to store response of http request
     int content_length = 0;
     esp_http_client_config_t config = {
         .url = url,
+        .timeout_ms = 1000,
+        .transport_type = HTTP_TRANSPORT_OVER_TCP,
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
     esp_http_client_set_method(client, HTTP_METHOD_POST);
@@ -205,27 +212,33 @@ static void send_http_post(const char *url, char *payload) {
         } else {
             int data_read = esp_http_client_read_response(client, output_buffer, MAX_HTTP_OUTPUT_BUFFER);
             if (data_read >= 0) {
-                ESP_LOGI(TAG_HTTP, "HTTP POST Status = %d, content_length = %lld",
+                //ESP_LOGI(TAG_HTTP, "HTTP POST Status = %d, content_length = %lld",
                 esp_http_client_get_status_code(client),
                 esp_http_client_get_content_length(client));
-                ESP_LOG_BUFFER_HEX(TAG_HTTP, output_buffer, strlen(output_buffer));
+                //ESP_LOG_BUFFER_HEX(TAG_HTTP, output_buffer, strlen(output_buffer));
             } else {
                 ESP_LOGE(TAG_HTTP, "Failed to read response");
             }
         }
     }
-    esp_http_client_cleanup(client);     
+    esp_http_client_cleanup(client);
+    int end = esp_timer_get_time();
+    ESP_LOGI("HTTP_POST", "Sending to server time: %d", (end - start) / 1000);     
 }
 
 void sendToServer(wifi_config_t send_config, const char *url, char *payload)
 {
+    int start = esp_timer_get_time();
     esp_wifi_set_config(ESP_IF_WIFI_STA, &send_config);
     //esp_wifi_connect();
+    esp_wifi_set_channel(send_config.sta.channel, WIFI_SECOND_CHAN_NONE);
     esp_err_t err = esp_wifi_connect();
     if (err != ESP_OK) {
-        ESP_LOGE(TAG_STA, "esp_wifi_connect failed: %s", esp_err_to_name(err)); 
+        ESP_LOGE(TAG_STA, "esp_wifi_connect failed: %s", esp_err_to_name(err));
+        return; 
     } else {
         // Waiting for the connection to be established and IP address to be assigned
+        start = esp_timer_get_time();
         EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
             GOT_IP_BIT | DISCONNECTED_BIT,
             pdFALSE,
@@ -240,8 +253,10 @@ void sendToServer(wifi_config_t send_config, const char *url, char *payload)
     }
     esp_wifi_disconnect();
     xEventGroupWaitBits(s_wifi_event_group, DISCONNECTED_BIT, pdTRUE, pdFALSE, portMAX_DELAY);
-    //esp_wifi_disconnect();
-    ESP_LOGI(TAG_STA, "GOT IP Disconnect");
+    int end = esp_timer_get_time();
+    ESP_LOGI("SendToServer", "Sending to server time: %d", (end - start) / 1000);
+    //vTaskDelay(20 / portTICK_PERIOD_MS);
+
 }
 
 scanResult_t wifiScanActiveChannels(scanResult_t scanResult)
@@ -259,32 +274,35 @@ scanResult_t wifiScanActiveChannels(scanResult_t scanResult)
         scan_config.channel = scanResult.uniqueChannels[i];
         ESP_ERROR_CHECK(esp_wifi_scan_start(&scan_config, true));
         ESP_ERROR_CHECK(esp_wifi_scan_get_ap_num(&numAP));
-        int i = 0;
+
         if (scanResult.scannedApList == NULL)
         {
+            int j = 0;
             do
             {
+                vTaskDelay(10 / portTICK_PERIOD_MS);
                 scanResult.scannedApList = malloc(numAP * sizeof(wifi_ap_record_t));
-                i++;
-            } while (scanResult.scannedApList == NULL || i > 5);
+                j++;
+            } while (scanResult.scannedApList == NULL && j < 5);
         }
         else
         {
             wifi_ap_record_t *temp = NULL;
-            i = 0;
+            int j = 0;
             do
-            {
+            {   
                 temp = realloc(
                     scanResult.scannedApList,
                     (scanResult.numOfScannedAP + numAP) * sizeof(wifi_ap_record_t));
-                i++;
-            } while (temp == NULL || i > 5);
+                j++;
+            } while (temp == NULL && j < 5);
             scanResult.scannedApList = temp;
         }
         if (!scanResult.scannedApList)
         {
             ESP_LOGE(TAG_STA, "Failed to allocate memory for scanned AP list");
             scanResult.numOfScannedAP = 0;
+            scanResult.uniqueChannelCount = 0;
             free(scanResult.scannedApList);
             free(scanResult.uniqueChannels);
             scanResult.scannedApList = NULL;
@@ -292,9 +310,7 @@ scanResult_t wifiScanActiveChannels(scanResult_t scanResult)
             return scanResult;
         }
         ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&numAP, (wifi_ap_record_t *)(scanResult.scannedApList + scanResult.numOfScannedAP)));
-        scanResult.numOfScannedAP += numAP;
-        
-        // ESP_LOGI(TAG_STA, "Found %d APs on channel %d\n", numAP, scan_config.channel);
+        scanResult.numOfScannedAP += numAP;        
     }
     return scanResult;
 }
@@ -316,8 +332,10 @@ result_t performFTM(scanResult_t scanResult) {
         free(result.ftmResultsList);
         result.ftmResultsList = NULL;
         result.numOfResults = 0;
+        result.numOfFtmResponders = 0;
         return result;        
     }
+    int ftm_responders_count = 0;
     for (int i = 0; i < scanResult.numOfScannedAP; i++)
     {
         ftmResult_t ftmResult;
@@ -325,10 +343,7 @@ result_t performFTM(scanResult_t scanResult) {
         {
             ftm_responders++;
             ftmResult = startFtmSession(scanResult.scannedApList[i].bssid, scanResult.scannedApList[i].primary);
-
-            // ESP_LOGI(TAG_STA, "FTM avg_RSSI: %d, avg_rtt_raw: %d, min_rtt_raw: %d, rtt_est: %d, dist_est: %d cm ",
-            //     pFtmResult->avg_RSSI, pFtmResult->avg_rtt_raw, pFtmResult->min_rtt_raw, pFtmResult->rtt_est, pFtmResult->dist_est
-            //);
+            if (ftmResult.avg_rtt_raw > 0) ftm_responders_count++;
         }
         else
         {
@@ -345,6 +360,7 @@ result_t performFTM(scanResult_t scanResult) {
         memcpy(result.ftmResultsList + i, &ftmResult, sizeof(ftmResult_t));
     }
     result.numOfResults = scanResult.numOfScannedAP;
+    result.numOfFtmResponders = ftm_responders_count;
 
     // Send results to the server
     return result;
@@ -356,7 +372,7 @@ scanResult_t wifiScanAllChannels()
     // int64_t start = esp_timer_get_time();
     wifi_scan_config_t scan_config = scanALl_config;
     scanResult_t scanResult;
-
+    vTaskDelay(100 / portTICK_PERIOD_MS);
     if (ESP_OK == esp_wifi_scan_start(&scan_config, true)) {
         esp_wifi_scan_get_ap_num(&scanResult.numOfScannedAP);
         if (scanResult.numOfScannedAP > 0) {
@@ -501,6 +517,9 @@ esp_err_t wifiStaInit(void)
     assert(sta_netif);
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+
+    cfg.nvs_enable = true;
+    //cfg.nvs_enable = false;
 
     esp_event_handler_instance_t instance_any_id;
     esp_event_handler_instance_t instance_got_ip;
