@@ -10,14 +10,18 @@
 #include "jsonUtil.h"
 #include <string.h>
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
+
+
 
 #define PRODUCTION true
 #define MAC_ADDRESS_LENGTH 6
 #define MIN_FTM_RESULTS 0
 
-static const char *server_url = "http://192.168.1.3:8080/post/";
-static const char *server_ap_ssid = "NETGEARREX";
-static const char *server_ap_password = "Investor001";
+//static const char *server_url = "http://192.168.1.3:8080/post/";
+//static const char *server_ap_ssid = "NETGEARREX";
+//static const char *server_ap_password = "Investor001";
 
 
 
@@ -25,19 +29,19 @@ static const char *server_ap_password = "Investor001";
 // Default settings for the device
 static cJSON* useDefaultSettings(void) {
     cJSON *settings_json = cJSON_CreateObject();
-    cJSON_AddStringToObject(settings_json, "SSID", "factorySSID");
-    cJSON_AddStringToObject(settings_json, "Wifi_username", "admin");
-    cJSON_AddStringToObject(settings_json, "Wifi_password", "password");
+    cJSON_AddStringToObject(settings_json, "server_url", "http://192.168.1.3:8080/post/");
+    cJSON_AddStringToObject(settings_json, "connect_to_ap_ssid", "NETGEARREX");
+    cJSON_AddStringToObject(settings_json, "connect_to_ap_password", "Investor001");
     return settings_json;
 }
 
-static void upload_data_to_server(result_t result, char* results_json_str) {
+static void upload_data_to_server(cJSON *p_settings ,result_t result, char* results_json_str) {
     // Send the results to the server
     uint8_t bestRSSI = 0;
     int8_t rssi = -127;
     // Find the channel of AP with highest RSSI that has the same SSID as the server network.
     for (int i = 0; i < result.numOfResults; i++) {
-        if (result.ftmResultsList[i].rssi > rssi && result.ftmResultsList[i].ssid[0] == *server_ap_ssid  ) {
+        if (result.ftmResultsList[i].rssi > rssi && result.ftmResultsList[i].ssid[0] == cJSON_GetObjectItemCaseSensitive(p_settings, "connect_to_ap_ssid")->valuestring[0]) {
             rssi = result.ftmResultsList[i].rssi;
             bestRSSI = i;
         }
@@ -59,9 +63,10 @@ static void upload_data_to_server(result_t result, char* results_json_str) {
         },
     };    
     memcpy(send_config.sta.ssid, result.ftmResultsList[bestRSSI].ssid, 32);
-    memcpy(send_config.sta.password, server_ap_password, strlen(server_ap_password));
+    char *password = cJSON_GetObjectItemCaseSensitive(p_settings, "connect_to_ap_password")->valuestring;
+    memcpy(send_config.sta.password, password, strlen(password));
     memcpy(send_config.sta.bssid, result.ftmResultsList[bestRSSI].bssid, MAC_ADDRESS_LENGTH);    
-    sendToServer(send_config, server_url, results_json_str);
+    sendToServer(send_config, cJSON_GetObjectItemCaseSensitive(p_settings, "server_url")->valuestring, results_json_str);
 }
 
 void app_main(void)
@@ -72,12 +77,12 @@ void app_main(void)
         printf("Failed to initialize NVS");
     }
     // load settings from NVS
-    cJSON *pSettings;
-    pSettings = readSettings();
-    if (pSettings == NULL)
+    cJSON *p_settings;
+    p_settings = readSettings();
+    if (p_settings == NULL)
     {
         printf("No settings file found, using default settings\n");
-        pSettings = useDefaultSettings();
+        p_settings = useDefaultSettings();
     }
 
     // Initialize the Wifi
@@ -102,7 +107,7 @@ void app_main(void)
             char* results_json_str = result2JsonStr(result); // Convert the results to a JSON string
             
             // HTTP POST to server
-            upload_data_to_server(result, results_json_str);
+            upload_data_to_server(p_settings, result, results_json_str);
             free(results_json_str);
 
 
@@ -123,12 +128,20 @@ void app_main(void)
                     results_json_str = result2JsonStr(result); // Convert the results to a JSON string
                     
                     // HTTP POST to server
-                    upload_data_to_server(result, results_json_str);
+                    upload_data_to_server(p_settings, result, results_json_str);
                     free(results_json_str);;
+                } else {
+                    break;
                 }
                 int end = esp_timer_get_time();
                 int heap = esp_get_free_heap_size();
                 ESP_LOGI("main", "Loop took %d ms heapsize: %d", (end - start) / 1000, heap);
+                if ((end - start) / 1000 < 50) {
+                    ESP_LOGE("BUG", "BUUUUUGGG");
+                    while (true) {
+                        vTaskDelay(1000);
+                    }
+                }
             }
             ESP_LOGE("main", "No more FTM results, WIFI scan ALL channels now");
             if (result.ftmResultsList != NULL) {

@@ -206,20 +206,20 @@ static void send_http_post(const char *url, char *payload) {
         if (wlen < 0) {
             ESP_LOGE(TAG_HTTP, "Write failed");
         }
-        content_length = esp_http_client_fetch_headers(client);
-        if (content_length < 0) {
-            ESP_LOGE(TAG_HTTP, "HTTP client fetch headers failed");
-        } else {
-            int data_read = esp_http_client_read_response(client, output_buffer, MAX_HTTP_OUTPUT_BUFFER);
-            if (data_read >= 0) {
-                //ESP_LOGI(TAG_HTTP, "HTTP POST Status = %d, content_length = %lld",
-                esp_http_client_get_status_code(client),
-                esp_http_client_get_content_length(client));
-                //ESP_LOG_BUFFER_HEX(TAG_HTTP, output_buffer, strlen(output_buffer));
-            } else {
-                ESP_LOGE(TAG_HTTP, "Failed to read response");
-            }
-        }
+        // content_length = esp_http_client_fetch_headers(client);
+        // if (content_length < 0) {
+        //     ESP_LOGE(TAG_HTTP, "HTTP client fetch headers failed");
+        // } else {
+        //     int data_read = esp_http_client_read_response(client, output_buffer, MAX_HTTP_OUTPUT_BUFFER);
+        //     if (data_read >= 0) {
+        //         ESP_LOGI(TAG_HTTP, "HTTP POST Status = %d, content_length = %lld",
+        //         esp_http_client_get_status_code(client),
+        //         esp_http_client_get_content_length(client));
+        //         ESP_LOG_BUFFER_HEX(TAG_HTTP, output_buffer, strlen(output_buffer));
+        //     } else {
+        //         ESP_LOGE(TAG_HTTP, "Failed to read response");
+        //     }
+        // }
     }
     esp_http_client_cleanup(client);
     int end = esp_timer_get_time();
@@ -291,6 +291,7 @@ scanResult_t wifiScanActiveChannels(scanResult_t scanResult)
             int j = 0;
             do
             {   
+                vTaskDelay(10 / portTICK_PERIOD_MS);
                 temp = realloc(
                     scanResult.scannedApList,
                     (scanResult.numOfScannedAP + numAP) * sizeof(wifi_ap_record_t));
@@ -307,6 +308,7 @@ scanResult_t wifiScanActiveChannels(scanResult_t scanResult)
             free(scanResult.uniqueChannels);
             scanResult.scannedApList = NULL;
             scanResult.uniqueChannels = NULL;
+            vTaskDelay(1000 / portTICK_PERIOD_MS);
             return scanResult;
         }
         ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&numAP, (wifi_ap_record_t *)(scanResult.scannedApList + scanResult.numOfScannedAP)));
@@ -454,7 +456,7 @@ static void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info)
 
 void wifi_csi_init()
 {
-    ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
+    //ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
     // ESP_ERROR_CHECK(esp_wifi_set_promiscuous_rx_cb(g_wifi_radar_config->wifi_sniffer_cb));
 
     /**< default config */
