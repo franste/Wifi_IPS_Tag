@@ -98,7 +98,8 @@ void app_main(void)
 
     //ESP_ERROR_CHECK(ftmInit());
 
-    //wifi_csi_init();
+    wifi_csi_init();
+
     while (true)
     {
         scanResult_t scanResult = wifiScanAllChannels();

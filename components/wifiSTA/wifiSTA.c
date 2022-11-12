@@ -14,8 +14,9 @@
 #include "cJSON.h"
 #include "esp_sntp.h"
 #include "esp_http_client.h"
-#include "esp_tls.h"
+//#include "esp_tls.h"
 #include "esp_timer.h"
+#include "wifi_packets.h"
 
 
 #define MAC_ADDRESS_LENGTH 6
@@ -25,7 +26,7 @@
 #define MAX_HTTP_RECV_BUFFER 512
 #define MAX_HTTP_OUTPUT_BUFFER 1024
 
-static const uint8_t CONFIG_CSI_SEND_MAC[] = {0x1a, 0x00, 0x00, 0x00, 0x00, 0x00};
+//static const uint8_t CONFIG_CSI_SEND_MAC[] = {0x1a, 0x00, 0x00, 0x00, 0x00, 0x00};
 
 // Tags for logging
 static const char *TAG_CSI = "csi_recv";
@@ -55,8 +56,8 @@ static const wifi_scan_config_t scanALl_config = {
     .channel = 0,
     .show_hidden = true,
     .scan_type = WIFI_SCAN_TYPE_ACTIVE,
-    .scan_time.active.min = 10, // milliseconds
-    .scan_time.active.max = 40  // milliseconds
+    .scan_time.active.min = 50, // milliseconds
+    .scan_time.active.max = 50,  // milliseconds
 };
 
 static wifi_config_t wifi_config = {
@@ -72,6 +73,9 @@ static wifi_config_t wifi_config = {
         .ft_enabled = 1,
     },
 };
+
+//CSI
+//SemaphoreHandle_t mutex = NULL; // mutex for csi
 
 static ftmResult_t ftm_process_report(void)
 {
@@ -188,8 +192,8 @@ static void eventHandler(void *arg, esp_event_base_t event_base,
 static void send_http_post(const char *url, char *payload) {
     int start = esp_timer_get_time();
 
-    char output_buffer[MAX_HTTP_OUTPUT_BUFFER] = {0};   // Buffer to store response of http request
-    int content_length = 0;
+    //char output_buffer[MAX_HTTP_OUTPUT_BUFFER] = {0};   // Buffer to store response of http request
+    //int content_length = 0;
     esp_http_client_config_t config = {
         .url = url,
         .timeout_ms = 1000,
@@ -229,9 +233,10 @@ static void send_http_post(const char *url, char *payload) {
 void sendToServer(wifi_config_t send_config, const char *url, char *payload)
 {
     int start = esp_timer_get_time();
+    //esp_wifi_set_promiscuous(false);
+    
     esp_wifi_set_config(ESP_IF_WIFI_STA, &send_config);
-    //esp_wifi_connect();
-    esp_wifi_set_channel(send_config.sta.channel, WIFI_SECOND_CHAN_NONE);
+    esp_wifi_set_channel(send_config.sta.channel, WIFI_SECOND_CHAN_ABOVE);
     esp_err_t err = esp_wifi_connect();
     if (err != ESP_OK) {
         ESP_LOGE(TAG_STA, "esp_wifi_connect failed: %s", esp_err_to_name(err));
@@ -255,12 +260,13 @@ void sendToServer(wifi_config_t send_config, const char *url, char *payload)
     xEventGroupWaitBits(s_wifi_event_group, DISCONNECTED_BIT, pdTRUE, pdFALSE, portMAX_DELAY);
     int end = esp_timer_get_time();
     ESP_LOGI("SendToServer", "Sending to server time: %d", (end - start) / 1000);
+    //esp_wifi_set_promiscuous(true);
     //vTaskDelay(20 / portTICK_PERIOD_MS);
 
 }
 
 scanResult_t wifiScanActiveChannels(scanResult_t scanResult)
-{
+{   
     wifi_scan_config_t scan_config = scanALl_config;
     uint16_t numAP = 0;
     scanResult.numOfScannedAP = 0;
@@ -269,10 +275,22 @@ scanResult_t wifiScanActiveChannels(scanResult_t scanResult)
         free(scanResult.scannedApList);
         scanResult.scannedApList = NULL;
     }
+
+
+    esp_wifi_set_csi(true);
+
     for (int i = 0; i < scanResult.uniqueChannelCount; i++)
     {
         scan_config.channel = scanResult.uniqueChannels[i];
+        esp_err_t err = esp_wifi_set_channel(scan_config.channel, WIFI_SECOND_CHAN_NONE);
+        if (err != ESP_OK) {
+            ESP_LOGE("TEST", "esp_wifi_set_channel failed: %s", esp_err_to_name(err));
+        }
+        ESP_ERROR_CHECK(esp_wifi_set_bandwidth(ESP_IF_WIFI_STA, WIFI_BW_HT40));
+        //create_probe_request_packet();
+        
         ESP_ERROR_CHECK(esp_wifi_scan_start(&scan_config, true));
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
         ESP_ERROR_CHECK(esp_wifi_scan_get_ap_num(&numAP));
 
         if (scanResult.scannedApList == NULL)
@@ -309,11 +327,13 @@ scanResult_t wifiScanActiveChannels(scanResult_t scanResult)
             scanResult.scannedApList = NULL;
             scanResult.uniqueChannels = NULL;
             vTaskDelay(1000 / portTICK_PERIOD_MS);
+            esp_wifi_set_csi(false);
             return scanResult;
         }
         ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&numAP, (wifi_ap_record_t *)(scanResult.scannedApList + scanResult.numOfScannedAP)));
         scanResult.numOfScannedAP += numAP;        
     }
+    esp_wifi_set_csi(false);
     return scanResult;
 }
 
@@ -375,6 +395,7 @@ scanResult_t wifiScanAllChannels()
     wifi_scan_config_t scan_config = scanALl_config;
     scanResult_t scanResult;
     vTaskDelay(100 / portTICK_PERIOD_MS);
+    esp_wifi_set_csi(true);
     if (ESP_OK == esp_wifi_scan_start(&scan_config, true)) {
         esp_wifi_scan_get_ap_num(&scanResult.numOfScannedAP);
         if (scanResult.numOfScannedAP > 0) {
@@ -402,6 +423,7 @@ scanResult_t wifiScanAllChannels()
                         }
                     }
                     scanResult.uniqueChannelCount = counter;
+                    esp_wifi_set_csi(false);
                     return scanResult;
                 }
             }
@@ -412,66 +434,98 @@ scanResult_t wifiScanAllChannels()
     free(scanResult.uniqueChannels);
     scanResult.scannedApList = NULL;
     scanResult.uniqueChannels = NULL;
+    esp_wifi_set_csi(false);
     return scanResult;
 }
 
 static void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info)
 {
-    if (!info || !info->buf || !info->mac)
-    {
-        ESP_LOGW(TAG_CSI, "<%s> wifi_csi_cb", esp_err_to_name(ESP_ERR_INVALID_ARG));
+    
+    //xSemaphoreTake(mutex, portMAX_DELAY);
+    uint8_t mac[MAC_ADDRESS_LENGTH];
+    esp_wifi_get_mac(ESP_IF_WIFI_STA, mac);
+    if (memcmp(info->mac, mac, MAC_ADDRESS_LENGTH) == 0) {
+        ESP_LOGE(TAG_CSI, "CSI data received channel: %d same mac: "MACSTR" - "MACSTR"", info->rx_ctrl.channel, MAC2STR(info->mac), MAC2STR(mac));
+        //Scource MAC is the same as the device MAC, Do Nothing.
         return;
+    } else {
+        ESP_LOGE(TAG_CSI, "CSI data received channel: %d different mac: "MACSTR" - "MACSTR"", info->rx_ctrl.channel, MAC2STR(info->mac), MAC2STR(mac));
+        //info->rx_ctrl.
     }
 
-    if (memcmp(info->mac, CONFIG_CSI_SEND_MAC, 6))
-    {
-        return;
-    }
+    // Check if the AP is already in the list
+    
 
-    static uint32_t s_count = 0;
-    const wifi_pkt_rx_ctrl_t *rx_ctrl = &info->rx_ctrl;
 
-    if (!s_count)
-    {
-        ESP_LOGI(TAG_CSI, "================ CSI RECV ================");
-        ets_printf("type,id,mac,rssi,rate,sig_mode,mcs,bandwidth,smoothing,not_sounding,aggregation,stbc,fec_coding,sgi,noise_floor,ampdu_cnt,channel,secondary_channel,local_timestamp,ant,sig_len,rx_state,len,first_word,data\n");
-    }
 
-    ets_printf("CSI_DATA,%d," MACSTR ",%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
-               s_count++, MAC2STR(info->mac), rx_ctrl->rssi, rx_ctrl->rate, rx_ctrl->sig_mode,
-               rx_ctrl->mcs, rx_ctrl->cwb, rx_ctrl->smoothing, rx_ctrl->not_sounding,
-               rx_ctrl->aggregation, rx_ctrl->stbc, rx_ctrl->fec_coding, rx_ctrl->sgi,
-               rx_ctrl->noise_floor, rx_ctrl->ampdu_cnt, rx_ctrl->channel, rx_ctrl->secondary_channel,
-               rx_ctrl->timestamp, rx_ctrl->ant, rx_ctrl->sig_len, rx_ctrl->rx_state);
 
-    ets_printf(",%d,%d,\"[%d", info->len, info->first_word_invalid, info->buf[0]);
+    // if (!info || !info->buf || !info->mac)
+    // {
+    //     ESP_LOGW(TAG_CSI, "<%s> wifi_csi_cb", esp_err_to_name(ESP_ERR_INVALID_ARG));
+    //     return;
+    // }
 
-    for (int i = 1; i < info->len; i++)
-    {
-        ets_printf(",%d", info->buf[i]);
-    }
+    // if (memcmp(info->mac, CONFIG_CSI_SEND_MAC, 6))
+    // {
+    //     return;
+    // }
 
-    ets_printf("]\"\n");
+    // static uint32_t s_count = 0;
+    // const wifi_pkt_rx_ctrl_t *rx_ctrl = &info->rx_ctrl;
+
+    // if (!s_count)
+    // {
+    //     ESP_LOGI(TAG_CSI, "================ CSI RECV ================");
+    //     ets_printf("type,id,mac,rssi,rate,sig_mode,mcs,bandwidth,smoothing,not_sounding,aggregation,stbc,fec_coding,sgi,noise_floor,ampdu_cnt,channel,secondary_channel,local_timestamp,ant,sig_len,rx_state,len,first_word,data\n");
+    // }
+
+    // ets_printf("CSI_DATA,%d," MACSTR ",%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
+    //            s_count++, MAC2STR(info->mac), rx_ctrl->rssi, rx_ctrl->rate, rx_ctrl->sig_mode,
+    //            rx_ctrl->mcs, rx_ctrl->cwb, rx_ctrl->smoothing, rx_ctrl->not_sounding,
+    //            rx_ctrl->aggregation, rx_ctrl->stbc, rx_ctrl->fec_coding, rx_ctrl->sgi,
+    //            rx_ctrl->noise_floor, rx_ctrl->ampdu_cnt, rx_ctrl->channel, rx_ctrl->secondary_channel,
+    //            rx_ctrl->timestamp, rx_ctrl->ant, rx_ctrl->sig_len, rx_ctrl->rx_state);
+
+    // ets_printf(",%d,%d,\"[%d", info->len, info->first_word_invalid, info->buf[0]);
+
+    // for (int i = 1; i < info->len; i++)
+    // {
+    //     ets_printf(",%d", info->buf[i]);
+    // }
+
+    // ets_printf("]\"\n");
 }
+
+static void promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
+    // ESP_LOGI(TAG, "promiscuous_cb");
+} 
 
 void wifi_csi_init()
 {
-    //ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
-    // ESP_ERROR_CHECK(esp_wifi_set_promiscuous_rx_cb(g_wifi_radar_config->wifi_sniffer_cb));
+    
 
     /**< default config */
     wifi_csi_config_t csi_config = {
         .lltf_en = true,
         .htltf_en = true,
         .stbc_htltf2_en = true,
-        .ltf_merge_en = true,
-        .channel_filter_en = true,
+        .ltf_merge_en = false,
+        .channel_filter_en = false,
         .manu_scale = false,
         .shift = false,
     };
+
+    wifi_promiscuous_filter_t filer_promi_ctrl = {
+        .filter_mask = WIFI_PROMIS_FILTER_MASK_CTRL | WIFI_PROMIS_FILTER_MASK_DATA,
+    };
+    esp_wifi_set_promiscuous_filter(&filer_promi_ctrl);
+    //esp_wifi_set_promiscuous_rx_cb(&wifi_csi_rx_cb);
+
     ESP_ERROR_CHECK(esp_wifi_set_csi_config(&csi_config));
-    ESP_ERROR_CHECK(esp_wifi_set_csi_rx_cb(wifi_csi_rx_cb, NULL));
+    ESP_ERROR_CHECK(esp_wifi_set_csi_rx_cb(&wifi_csi_rx_cb, NULL));
     ESP_ERROR_CHECK(esp_wifi_set_csi(true));
+
+    //mutex = xSemaphoreCreateMutex();
 }
 
 void syncTime()
