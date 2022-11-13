@@ -19,13 +19,6 @@
 #define MAC_ADDRESS_LENGTH 6
 #define MIN_FTM_RESULTS 0
 
-//static const char *server_url = "http://192.168.1.3:8080/post/";
-//static const char *server_ap_ssid = "NETGEARREX";
-//static const char *server_ap_password = "Investor001";
-
-
-
-
 // Default settings for the device
 static cJSON* useDefaultSettings(void) {
     cJSON *settings_json = cJSON_CreateObject();
@@ -52,12 +45,16 @@ void app_main(void)
     }
 
     // Initialize the Wifi
-    //wifiSettings(pSettings);
     ESP_ERROR_CHECK(wifiStaInit());
 
     // Initialize the CSI
     wifi_csi_init();
 
+    // Set default Logging level. Can be changed via REPL
+    esp_log_level_set("*", ESP_LOG_NONE);
+
+    // Start the REPL
+    repl(p_settings);
 
     // Join Ap
     joinAP(CONFIG_DEV_WIFI_SSID, CONFIG_DEV_WIFI_PASSWORD);
@@ -74,12 +71,14 @@ void app_main(void)
             char* results_json_str = result2JsonStr(result, csi_result_list); // Convert the results to a JSON string
             
             // HTTP POST to server
+            vTaskDelay(10 / portTICK_PERIOD_MS); // Wait for subprocessing to finish, if it is running.
             send_http_post(cJSON_GetObjectItemCaseSensitive(p_settings, "server_url")->valuestring, results_json_str);
             free(results_json_str);
             free(csi_result_list.list);
 
             /* Scanning only channels found in all scan*/
             while (result.numOfFtmResponders >=  MIN_FTM_RESULTS) {
+                //vTaskDelay(10 / portTICK_PERIOD_MS); // Wait for subprocessing to finish, if it is running.
                 int start = esp_timer_get_time();
                 if (result.ftmResultsList != NULL) {
                     free(result.ftmResultsList);
@@ -89,36 +88,24 @@ void app_main(void)
                 }
                 scanResult = wifiScanActiveChannels(scanResult);
                 if (scanResult.numOfScannedAP > 0) {
+                    //vTaskDelay(10 / portTICK_PERIOD_MS); // Wait for subprocessing to finish, if it is running.
                     result = performFTM(scanResult); // Initiate FTM to all FTM responders in the scan result
                     csi_result_list = get_csi_results();
                     char* results_json_str = result2JsonStr(result, csi_result_list); // Convert the results to a JSON string
                     
-                    // HTTP POST to server
+                    //HTTP POST to server
+                    //vTaskDelay(10 / portTICK_PERIOD_MS); // Wait for subprocessing to finish, if it is running.
                     send_http_post(cJSON_GetObjectItemCaseSensitive(p_settings, "server_url")->valuestring, results_json_str);
                     free(results_json_str);
                     free(csi_result_list.list);
                     int end = esp_timer_get_time();
                     int heap = esp_get_free_heap_size();
                     ESP_LOGI("main", "Loop took %d ms heapsize: %d", (end - start) / 1000, heap);
-                    
-                    // Just for testing
-                    if ((end - start) / 1000 < 50) {
-                        ESP_LOGE("BUG", "BUUUUUGGG");
-                    while (true) {
-                        vTaskDelay(1000);
-                    }
-                }
                 } else {
                     break;
                 }
             }
             ESP_LOGI("main", "No more FTM results, WIFI scan ALL channels now");
-            // if (result.ftmResultsList != NULL) {
-            //         free(result.ftmResultsList);
-            //         result.ftmResultsList = NULL;
-            //         result.numOfResults = 0;
-            //         result.numOfFtmResponders = 0;
-            // }
         } else {
             ESP_LOGI("main", "No APs found\n");
         }

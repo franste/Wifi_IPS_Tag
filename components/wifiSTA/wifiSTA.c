@@ -339,6 +339,7 @@ void send_http_post(const char *url, char *payload) {
     esp_http_client_set_method(client, HTTP_METHOD_POST);
     esp_http_client_set_header(client, "Content-Type", "application/json");
     esp_err_t err = esp_http_client_open(client, strlen(payload));
+
     if (err != ESP_OK) {
         ESP_LOGE(TAG_HTTP, "Failed to open HTTP connection: %s", esp_err_to_name(err));
     } else {
@@ -362,6 +363,7 @@ void send_http_post(const char *url, char *payload) {
         // }
     }
     esp_http_client_cleanup(client);
+    //vTaskDelay(25 / portTICK_PERIOD_MS); // Give some time to subprocesses to execute.
 }
 
 scanResult_t wifiScanActiveChannels(scanResult_t scanResult)
@@ -609,11 +611,13 @@ static void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info)
     uint8_t mac[MAC_ADDRESS_LENGTH];
     esp_wifi_get_mac(ESP_IF_WIFI_STA, mac);
     if (memcmp(info->mac, mac, MAC_ADDRESS_LENGTH) == 0) {
-        ESP_LOGE(TAG_CSI, "CSI data received channel: %d same mac: "MACSTR" - "MACSTR"", info->rx_ctrl.channel, MAC2STR(info->mac), MAC2STR(mac));
+        //ESP_LOGE(TAG_CSI, "CSI data received channel: %d same mac: "MACSTR" - "MACSTR"", info->rx_ctrl.channel, MAC2STR(info->mac), MAC2STR(mac));
         //Scource MAC is the same as the device MAC, Do Nothing.
         return;
     } else {
-        ESP_LOGE(TAG_CSI, "CSI data received channel: %d different mac: "MACSTR" - "MACSTR" bandwith: %d", info->rx_ctrl.channel, MAC2STR(info->mac), MAC2STR(mac), info->rx_ctrl.cwb);
+        vTaskDelay(10 / portTICK_PERIOD_MS); // Wait for subprocessing to finish, if it is running.
+
+        //ESP_LOGE(TAG_CSI, "CSI data received channel: %d different mac: "MACSTR" - "MACSTR" bandwith: %d", info->rx_ctrl.channel, MAC2STR(info->mac), MAC2STR(mac), info->rx_ctrl.cwb);
         csi_result_t csiResult;
         memcpy(csiResult.bssid, info->mac, MAC_ADDRESS_LENGTH);
         csiResult.noise_floor = info->rx_ctrl.noise_floor;
