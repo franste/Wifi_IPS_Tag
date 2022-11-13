@@ -35,40 +35,6 @@ static cJSON* useDefaultSettings(void) {
     return settings_json;
 }
 
-static void upload_data_to_server(cJSON *p_settings ,result_t result, char* results_json_str) {
-    // Send the results to the server
-    uint8_t bestRSSI = 0;
-    int8_t rssi = -127;
-    // Find the channel of AP with highest RSSI that has the same SSID as the server network.
-    for (int i = 0; i < result.numOfResults; i++) {
-        if (result.ftmResultsList[i].rssi > rssi && result.ftmResultsList[i].ssid[0] == cJSON_GetObjectItemCaseSensitive(p_settings, "connect_to_ap_ssid")->valuestring[0]) {
-            rssi = result.ftmResultsList[i].rssi;
-            bestRSSI = i;
-        }
-    }
-
-    // WIFI config for sending to server
-    wifi_config_t send_config = {
-        .sta = {
-            //.bssid_set = true,
-            .channel = result.ftmResultsList[bestRSSI].channel,
-            .scan_method = WIFI_FAST_SCAN,
-            .ft_enabled = true,
-            .owe_enabled = true,
-            .mbo_enabled = true,
-            .pmf_cfg = {
-                .capable = true,
-                .required = false
-            },
-        },
-    };    
-    memcpy(send_config.sta.ssid, result.ftmResultsList[bestRSSI].ssid, 32);
-    char *password = cJSON_GetObjectItemCaseSensitive(p_settings, "connect_to_ap_password")->valuestring;
-    memcpy(send_config.sta.password, password, strlen(password));
-    memcpy(send_config.sta.bssid, result.ftmResultsList[bestRSSI].bssid, MAC_ADDRESS_LENGTH);    
-    sendToServer(send_config, cJSON_GetObjectItemCaseSensitive(p_settings, "server_url")->valuestring, results_json_str);
-}
-
 void app_main(void)
 {
     // Initialize NVS.
@@ -89,30 +55,31 @@ void app_main(void)
     //wifiSettings(pSettings);
     ESP_ERROR_CHECK(wifiStaInit());
 
-    // Initialize the ESP-NOW
-    //espNowInit();
-
-    // Sync the time with network WIP
-    //syncTime();
-
-
-    //ESP_ERROR_CHECK(ftmInit());
-
+    // Initialize the CSI
     wifi_csi_init();
 
+
+    // Join Ap
+    joinAP(CONFIG_DEV_WIFI_SSID, CONFIG_DEV_WIFI_PASSWORD);
+    
+
+    /* Scanning all channels*/
     while (true)
     {
+        /* Scanning all channels*/
         scanResult_t scanResult = wifiScanAllChannels();
         if (scanResult.numOfScannedAP > 0) {
             result_t result = performFTM(scanResult); // Initiate FTM to all FTM responders in the scan result
-            char* results_json_str = result2JsonStr(result); // Convert the results to a JSON string
+            csi_result_list_t csi_result_list = get_csi_results();
+            char* results_json_str = result2JsonStr(result, csi_result_list); // Convert the results to a JSON string
             
             // HTTP POST to server
-            upload_data_to_server(p_settings, result, results_json_str);
+            send_http_post(cJSON_GetObjectItemCaseSensitive(p_settings, "server_url")->valuestring, results_json_str);
             free(results_json_str);
+            free(csi_result_list.list);
 
-
-            while (result.numOfFtmResponders + 1 >  MIN_FTM_RESULTS) {
+            /* Scanning only channels found in all scan*/
+            while (result.numOfFtmResponders >=  MIN_FTM_RESULTS) {
                 int start = esp_timer_get_time();
                 if (result.ftmResultsList != NULL) {
                     free(result.ftmResultsList);
@@ -120,37 +87,38 @@ void app_main(void)
                     result.numOfResults = 0;
                     result.numOfFtmResponders = 0;
                 }
-
-                //free(scanResult.scannedApList);
-                //scanResult.scannedApList = NULL;
                 scanResult = wifiScanActiveChannels(scanResult);
                 if (scanResult.numOfScannedAP > 0) {
                     result = performFTM(scanResult); // Initiate FTM to all FTM responders in the scan result
-                    results_json_str = result2JsonStr(result); // Convert the results to a JSON string
+                    csi_result_list = get_csi_results();
+                    char* results_json_str = result2JsonStr(result, csi_result_list); // Convert the results to a JSON string
                     
                     // HTTP POST to server
-                    upload_data_to_server(p_settings, result, results_json_str);
-                    free(results_json_str);;
-                } else {
-                    break;
-                }
-                int end = esp_timer_get_time();
-                int heap = esp_get_free_heap_size();
-                ESP_LOGI("main", "Loop took %d ms heapsize: %d", (end - start) / 1000, heap);
-                if ((end - start) / 1000 < 50) {
-                    ESP_LOGE("BUG", "BUUUUUGGG");
+                    send_http_post(cJSON_GetObjectItemCaseSensitive(p_settings, "server_url")->valuestring, results_json_str);
+                    free(results_json_str);
+                    free(csi_result_list.list);
+                    int end = esp_timer_get_time();
+                    int heap = esp_get_free_heap_size();
+                    ESP_LOGI("main", "Loop took %d ms heapsize: %d", (end - start) / 1000, heap);
+                    
+                    // Just for testing
+                    if ((end - start) / 1000 < 50) {
+                        ESP_LOGE("BUG", "BUUUUUGGG");
                     while (true) {
                         vTaskDelay(1000);
                     }
                 }
+                } else {
+                    break;
+                }
             }
-            ESP_LOGE("main", "No more FTM results, WIFI scan ALL channels now");
-            if (result.ftmResultsList != NULL) {
-                    free(result.ftmResultsList);
-                    result.ftmResultsList = NULL;
-                    result.numOfResults = 0;
-                    result.numOfFtmResponders = 0;
-            }
+            ESP_LOGI("main", "No more FTM results, WIFI scan ALL channels now");
+            // if (result.ftmResultsList != NULL) {
+            //         free(result.ftmResultsList);
+            //         result.ftmResultsList = NULL;
+            //         result.numOfResults = 0;
+            //         result.numOfFtmResponders = 0;
+            // }
         } else {
             ESP_LOGI("main", "No APs found\n");
         }
@@ -165,22 +133,22 @@ void app_main(void)
             scanResult.uniqueChannelCount = 0;
         }
     } 
-        ESP_LOGI("main", "End of main");
+//         ESP_LOGI("main", "End of main");
 
 
 
-    /*Repl startup menu*/
-    //repl(pSettings);
+//     /*Repl startup menu*/
+//     //repl(pSettings);
 
-    /* Load settings from anchor*/
+//     /* Load settings from anchor*/
 
-    // Scan known channels
+//     // Scan known channels
 
-    // Ftm to anchors found on scan
+//     // Ftm to anchors found on scan
 
-    // Upload result to anchor
+//     // Upload result to anchor
 
-    // get settings version from anchor
+//     // get settings version from anchor
 
-    // Update settings if needed
+//     // Update settings if needed
 }

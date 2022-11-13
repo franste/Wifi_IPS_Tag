@@ -30,16 +30,31 @@ typedef struct {
     uint16_t numOfFtmResponders;
 } result_t;
 
+typedef struct {
+    signed int noise_floor;
+    signed int rssi;
+    uint8_t bssid[6];
+    int amplitude_min;
+    int amplitude_max;
+    int amplitude_avg;
+    int phase_min;
+    int phase_max;
+    int phase_avg;
+} csi_result_t;
+
+typedef struct {
+    csi_result_t *list;
+    uint16_t len;
+    uint16_t max_len;
+} csi_result_list_t;
 
 esp_err_t wifiStaInit();
 scanResult_t wifiScanAllChannels();
 scanResult_t wifiScanActiveChannels(scanResult_t scanResult);
 result_t performFTM(scanResult_t scanResult);
-void sendToServer(wifi_config_t send_config, const char *url, char *payload);
+void send_http_post(const char *url, char *payload);
 void wifi_csi_init();
-void syncTime();
-
-
-//esp_err_t wifi_apsta(int timeout_ms);
+csi_result_list_t get_csi_results();
+esp_err_t joinAP( char *ssid, char *password );
 
 #endif

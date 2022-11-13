@@ -9,7 +9,7 @@
 #define MAC_ADDRESS_LENGTH 6
 
 
-char* result2JsonStr(result_t results)
+char* result2JsonStr(result_t results, csi_result_list_t csi_results)
 {
     uint8_t mac[MAC_ADDRESS_LENGTH];
     esp_wifi_get_mac(ESP_IF_WIFI_STA, mac);
@@ -27,17 +27,30 @@ char* result2JsonStr(result_t results)
         cJSON *result_json = cJSON_CreateObject();
         cJSON_AddStringToObject(result_json, "BSSID", macStr);
         cJSON_AddNumberToObject(result_json, "RSSI", results.ftmResultsList[i].rssi);
-        if (results.ftmResultsList[i].avg_rtt_raw != 0)
-            cJSON_AddNumberToObject(result_json, "Avg_RTT", results.ftmResultsList[i].avg_rtt_raw);
-        if (results.ftmResultsList[i].min_rtt_raw != 0)
-            cJSON_AddNumberToObject(result_json, "Min_RTT", results.ftmResultsList[i].min_rtt_raw);
-        if (results.ftmResultsList[i].avg_RSSI != 0)
-            cJSON_AddNumberToObject(result_json, "Avg_RSSI", results.ftmResultsList[i].avg_RSSI);
-        if (results.ftmResultsList[i].rtt_est != 0)
-            cJSON_AddNumberToObject(result_json, "RTT_est", results.ftmResultsList[i].rtt_est);
-        if (results.ftmResultsList[i].dist_est != 0)
-            cJSON_AddNumberToObject(result_json, "Dist_est", results.ftmResultsList[i].dist_est);
+        if (results.ftmResultsList[i].avg_rtt_raw != 0) {
+            cJSON *ftm_json = cJSON_CreateObject();
+            cJSON_AddNumberToObject(ftm_json, "Avg_RTT", results.ftmResultsList[i].avg_rtt_raw);
+            cJSON_AddNumberToObject(ftm_json, "Min_RTT", results.ftmResultsList[i].min_rtt_raw);
+            cJSON_AddNumberToObject(ftm_json, "Avg_RSSI", results.ftmResultsList[i].avg_RSSI);
+            cJSON_AddNumberToObject(ftm_json, "RTT_est", results.ftmResultsList[i].rtt_est);
+            cJSON_AddNumberToObject(ftm_json, "Dist_est", results.ftmResultsList[i].dist_est);
+            cJSON_AddItemToObject(result_json, "Ftm", ftm_json);
+        }
         cJSON_AddItemToArray(result_array_json, result_json);
+        for (int j = 0; j < csi_results.len; j++) {
+            if (memcmp(csi_results.list[j].bssid, mac, MAC_ADDRESS_LENGTH) == 0) {
+                cJSON *csi_json = cJSON_CreateObject();
+                cJSON_AddNumberToObject(csi_json, "Noise_floor", csi_results.list[j].noise_floor);
+                cJSON_AddNumberToObject(csi_json, "RSSI", csi_results.list[j].rssi);
+                cJSON_AddNumberToObject(csi_json, "Amplitude_min", csi_results.list[j].amplitude_min);
+                cJSON_AddNumberToObject(csi_json, "Amplitude_max", csi_results.list[j].amplitude_max);
+                cJSON_AddNumberToObject(csi_json, "Amplitude_avg", csi_results.list[j].amplitude_avg);
+                cJSON_AddNumberToObject(csi_json, "Phase_min", csi_results.list[j].phase_min);
+                cJSON_AddNumberToObject(csi_json, "Phase_max", csi_results.list[j].phase_max);
+                cJSON_AddNumberToObject(csi_json, "Phase_avg", csi_results.list[j].phase_avg);
+                cJSON_AddItemToObject(result_json, "CSI", csi_json);
+            }
+        }
     }
     cJSON_AddItemToObject(results_json, "Results", result_array_json);
     char *results_json_str = cJSON_PrintUnformatted(results_json);
