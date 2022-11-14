@@ -250,7 +250,7 @@ static void print_menu()
     printf(" |  3. 'log <none|error|warning|info>' to set log level     |\n");
     printf(" |  4. 'ap <ssid> <password> <username>' ap to connect to   |\n");
     printf(" |  5. 'server <url>' a url to post json to                 |\n");
-    printf(" |  6. 'interval <seconds>' set the loop time               |\n");
+    printf(" |  6. 'interval <minutes>' set the loop time               |\n");
     printf(" |  7. 'device <name>' set the nickname of the device       |\n");
     printf(" |  8. 'menu' to show menu                                  |\n");
     printf(" ============================================================\n");
@@ -317,12 +317,12 @@ static void register_settings()
     ESP_ERROR_CHECK( esp_console_cmd_register(&url_cmd) );
 
     //Input to set interval
-    interval_args.interval = arg_int0(NULL, NULL, "<interval>", "Interval in seconds");
+    interval_args.interval = arg_int0(NULL, NULL, "<interval>", "Interval in minutes");
     interval_args.end = arg_end(1);
 
     const esp_console_cmd_t interval_cmd = {
         .command = "interval",
-        .help = "Set interval",
+        .help = "Set interval in minutes",
         .hint = NULL,
         .func = &set_interval,
         .argtable = &interval_args

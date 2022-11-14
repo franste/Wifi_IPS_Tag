@@ -9,60 +9,40 @@
 #include "esp_mac.h"
 #include "jsonUtil.h"
 #include <string.h>
-
+#include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
-
-
+#include "freertos/task.h"
+#include "esp_sleep.h"
 
 #define PRODUCTION true
 #define MAC_ADDRESS_LENGTH 6
-#define MIN_FTM_RESULTS 0
+#define MIN_FTM_RESULTS 1
+#define FACTOR_us_TO_s 1000000
+
+static cJSON *p_settings;
+static bool run_once = false;
+static TaskHandle_t main_task_handle = NULL;
+
+static EventGroupHandle_t s_task_event_group;
+static const int TASK_COMPLETED_BIT = BIT0;
+
 
 // Default settings for the device
 static cJSON* useDefaultSettings(void) {
     cJSON *settings_json = cJSON_CreateObject();
-    cJSON_AddStringToObject(settings_json, "server_url", "http://192.168.1.3:8080/post/");
-    cJSON_AddStringToObject(settings_json, "connect_to_ap_ssid", "NETGEARREX");
-    cJSON_AddStringToObject(settings_json, "connect_to_ap_password", "Investor001");
+    cJSON_AddStringToObject(settings_json, "server_url", CONFIG_DEV_SERVER_URL);
+    cJSON_AddStringToObject(settings_json, "connect_to_ap_ssid", CONFIG_DEV_WIFI_SSID);
+    cJSON_AddStringToObject(settings_json, "connect_to_ap_password", CONFIG_DEV_WIFI_PASSWORD);
+    cJSON_AddNumberToObject(settings_json, "interval", 0); // 0 = send data as soon as possible (seconds)
     return settings_json;
 }
 
-void app_main(void)
+void main_task(void *pvParameter)
 {
-    // Initialize NVS.
-    esp_err_t err = storageInit();
-    if (err != ESP_OK) {
-        printf("Failed to initialize NVS");
-    }
-    // load settings from NVS
-    cJSON *p_settings;
-    p_settings = readSettings();
-    if (p_settings == NULL)
-    {
-        printf("No settings file found, using default settings\n");
-        p_settings = useDefaultSettings();
-    }
+    xEventGroupClearBits(s_task_event_group, TASK_COMPLETED_BIT);
 
-    // Initialize the Wifi
-    ESP_ERROR_CHECK(wifiStaInit());
-
-    // Initialize the CSI
-    wifi_csi_init();
-
-    // Set default Logging level. Can be changed via REPL
-    esp_log_level_set("*", ESP_LOG_NONE);
-
-    // Start the REPL
-    repl(p_settings);
-
-    // Join Ap
-    joinAP(CONFIG_DEV_WIFI_SSID, CONFIG_DEV_WIFI_PASSWORD);
-    
-
-    /* Scanning all channels*/
-    while (true)
-    {
+    do {
         /* Scanning all channels*/
         scanResult_t scanResult = wifiScanAllChannels();
         if (scanResult.numOfScannedAP > 0) {
@@ -77,8 +57,8 @@ void app_main(void)
             free(csi_result_list.list);
 
             /* Scanning only channels found in all scan*/
-            while (result.numOfFtmResponders >=  MIN_FTM_RESULTS) {
-                //vTaskDelay(10 / portTICK_PERIOD_MS); // Wait for subprocessing to finish, if it is running.
+            while (result.numOfFtmResponders >=  MIN_FTM_RESULTS && !run_once) {
+                vTaskDelay(10 / portTICK_PERIOD_MS); // Wait for subprocessing to finish, if it is running.
                 int start = esp_timer_get_time();
                 if (result.ftmResultsList != NULL) {
                     free(result.ftmResultsList);
@@ -105,7 +85,9 @@ void app_main(void)
                     break;
                 }
             }
-            ESP_LOGI("main", "No more FTM results, WIFI scan ALL channels now");
+            if (run_once) ESP_LOGI("main", "Task stopped");
+            else ESP_LOGI("main", "No more FTM results, WIFI scan ALL channels now");
+
         } else {
             ESP_LOGI("main", "No APs found\n");
         }
@@ -119,23 +101,71 @@ void app_main(void)
             scanResult.uniqueChannels = NULL;
             scanResult.uniqueChannelCount = 0;
         }
-    } 
-//         ESP_LOGI("main", "End of main");
+    } while (!run_once);
+    xEventGroupSetBits(s_task_event_group, TASK_COMPLETED_BIT);
+    vTaskDelete(main_task_handle);
 
+} 
 
+void app_main(void)
+{
+    // Initialize NVS.
+    esp_err_t err = storageInit();
+    if (err != ESP_OK) {
+        printf("Failed to initialize NVS");
+    }
+    // load settings from NVS
+    p_settings = readSettings();
+    if (p_settings == NULL)
+    {
+        printf("No settings file found, using default settings\n");
+        p_settings = useDefaultSettings();
+    }
 
-//     /*Repl startup menu*/
-//     //repl(pSettings);
+    // Initialize the Wifi
+    ESP_ERROR_CHECK(wifiStaInit());
 
-//     /* Load settings from anchor*/
+    // Initialize the CSI
+    wifi_csi_init();
 
-//     // Scan known channels
+    // Set default Logging level. Can be changed via REPL
+    esp_log_level_set("*", ESP_LOG_NONE);
 
-//     // Ftm to anchors found on scan
+    // Start the REPL
+    repl(p_settings);
 
-//     // Upload result to anchor
+    // Join Ap
+    joinAP(
+        cJSON_GetObjectItemCaseSensitive(p_settings, "connect_to_ap_ssid")->valuestring, 
+        cJSON_GetObjectItemCaseSensitive(p_settings, "connect_to_ap_password")->valuestring
+    );
 
-//     // get settings version from anchor
+    // Create the task event group
+    s_task_event_group = xEventGroupCreate();
 
-//     // Update settings if needed
+    // Start the main task
+    TaskHandle_t main_task_handle = NULL;
+    cJSON *interval_json = cJSON_GetObjectItemCaseSensitive(p_settings, "interval");
+    int interval = 0; // time in minutes
+    if (cJSON_IsNumber(interval_json)) interval = cJSON_GetObjectItemCaseSensitive(p_settings, "interval")->valueint;
+    
+    if (interval > 0) run_once = true; // Run task only once
+    else run_once = false; // Run task continuously
+
+    xTaskCreatePinnedToCore(&main_task, "tag_task", 4096, NULL, 5, &main_task_handle, 1); // Run on core 1
+
+    xEventGroupWaitBits(s_task_event_group, TASK_COMPLETED_BIT, pdTRUE, pdTRUE, portMAX_DELAY); // Wait for task to complete
+
+    int since_boot_time = esp_timer_get_time();
+    ESP_LOGI("MAIN", "Task completed, time since boot %d ms, going to sleep now!!!", since_boot_time / 1000);
+    esp_sleep_enable_timer_wakeup(FACTOR_us_TO_s * 60 * interval - since_boot_time); // Sleep for interval - time since boot
+    wifiStaDeInit();
+    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH,   ESP_PD_OPTION_AUTO);
+    //esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_AUTO);
+    //esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_AUTO);
+    esp_sleep_pd_config(ESP_PD_DOMAIN_XTAL,         ESP_PD_OPTION_AUTO);
+    esp_sleep_enable_timer_wakeup(FACTOR_us_TO_s * 60 * interval - since_boot_time); // Sleep for interval - time since boot
+
+    esp_deep_sleep_start();  // Go to sleep
 }
+ 
