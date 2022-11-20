@@ -440,7 +440,12 @@ scanResult_t wifiScanAllChannels()
 {
     // int64_t start = esp_timer_get_time();
     wifi_scan_config_t scan_config = scanALl_config;
-    scanResult_t scanResult;
+    scanResult_t scanResult = {
+        .numOfScannedAP = 0,
+        .uniqueChannelCount = 0,
+        .scannedApList = NULL,
+        .uniqueChannels = NULL
+    };
     //esp_wifi_set_csi(true);
     if (ESP_OK == esp_wifi_scan_start(&scan_config, true)) {
         esp_wifi_scan_get_ap_num(&scanResult.numOfScannedAP);
@@ -469,17 +474,16 @@ scanResult_t wifiScanAllChannels()
                         }
                     }
                     scanResult.uniqueChannelCount = counter;
-                    //esp_wifi_set_csi(false);
                     return scanResult;
                 }
             }
+            scanResult.uniqueChannelCount = 0;
+            free(scanResult.scannedApList);
+            free(scanResult.uniqueChannels);
+            scanResult.scannedApList = NULL;
+            scanResult.uniqueChannels = NULL;
         }
         scanResult.numOfScannedAP = 0;
-        free(scanResult.scannedApList);
-        free(scanResult.uniqueChannels);
-        scanResult.scannedApList = NULL;
-        scanResult.uniqueChannels = NULL;
-        esp_wifi_set_csi(false);
     }
     return scanResult;
 }

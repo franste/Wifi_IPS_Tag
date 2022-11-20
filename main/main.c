@@ -14,8 +14,11 @@
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
 #include "esp_sleep.h"
+#include "spi_bmp390.h"
+//#include "spi_bmp390_test.h"
 
-#define PRODUCTION true
+//#define PRODUCTION true
+#define SENSOR_BMP390 true
 #define MAC_ADDRESS_LENGTH 6
 #define MIN_FTM_RESULTS 1
 #define FACTOR_us_TO_s 1000000
@@ -27,6 +30,7 @@ static TaskHandle_t main_task_handle = NULL;
 static EventGroupHandle_t s_task_event_group;
 static const int TASK_COMPLETED_BIT = BIT0;
 
+static bool sensor_bmp390 = SENSOR_BMP390;
 
 // Default settings for the device
 static cJSON* useDefaultSettings(void) {
@@ -38,6 +42,8 @@ static cJSON* useDefaultSettings(void) {
     return settings_json;
 }
 
+
+
 void main_task(void *pvParameter)
 {
     xEventGroupClearBits(s_task_event_group, TASK_COMPLETED_BIT);
@@ -48,7 +54,14 @@ void main_task(void *pvParameter)
         if (scanResult.numOfScannedAP > 0) {
             result_t result = performFTM(scanResult); // Initiate FTM to all FTM responders in the scan result
             csi_result_list_t csi_result_list = get_csi_results();
-            char* results_json_str = result2JsonStr(result, csi_result_list); // Convert the results to a JSON string
+
+            sensor_data_t sensor_data = {0};
+            if (sensor_bmp390) {
+                bmp390_temperature_and_pressure_shot_read(&sensor_data.temperature_c, &sensor_data.pressure_pa);
+                sensor_data.valid = true;
+            }
+
+            char* results_json_str = result2JsonStr(result, csi_result_list, &sensor_data); // Convert the results to a JSON string
             
             // HTTP POST to server
             vTaskDelay(10 / portTICK_PERIOD_MS); // Wait for subprocessing to finish, if it is running.
@@ -71,7 +84,14 @@ void main_task(void *pvParameter)
                     //vTaskDelay(10 / portTICK_PERIOD_MS); // Wait for subprocessing to finish, if it is running.
                     result = performFTM(scanResult); // Initiate FTM to all FTM responders in the scan result
                     csi_result_list = get_csi_results();
-                    char* results_json_str = result2JsonStr(result, csi_result_list); // Convert the results to a JSON string
+                    
+                    sensor_data_t sensor_data = {0};
+                    if (sensor_bmp390) {
+                        bmp390_temperature_and_pressure_shot_read(&sensor_data.temperature_c, &sensor_data.pressure_pa);
+                        sensor_data.valid = true;
+                    }
+
+                    char* results_json_str = result2JsonStr(result, csi_result_list, &sensor_data); // Convert the results to a JSON string
                     
                     //HTTP POST to server
                     //vTaskDelay(10 / portTICK_PERIOD_MS); // Wait for subprocessing to finish, if it is running.
@@ -91,6 +111,7 @@ void main_task(void *pvParameter)
         } else {
             ESP_LOGI("main", "No APs found\n");
         }
+        vTaskDelay(10 / portTICK_PERIOD_MS); // Wait for subprocessing to finish, if it is running.
         if (scanResult.scannedApList != NULL) {
             free(scanResult.scannedApList);
             scanResult.scannedApList = NULL;
@@ -120,6 +141,22 @@ void app_main(void)
     {
         printf("No settings file found, using default settings\n");
         p_settings = useDefaultSettings();
+    }
+    p_settings = useDefaultSettings(); // Use default settings
+    
+    // Initialize & configure BMP390
+    if (sensor_bmp390) {
+        err = spi_bmp390_init();
+        if (err == ESP_OK) {
+            err = configure_BM390_for_temperature_and_pressure_shot();
+            if (err != ESP_OK) {
+                printf("Failed to configure BMP390 for temperature and pressure shot");
+                sensor_bmp390 = false;
+            }
+        } else {
+            ESP_LOGE("main", "Failed to initialize BMP390");
+            sensor_bmp390 = false;
+        }
     }
 
     // Initialize the Wifi

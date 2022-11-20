@@ -4,12 +4,13 @@
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include <string.h>
+#include <math.h>
 
 
 #define MAC_ADDRESS_LENGTH 6
 
 
-char* result2JsonStr(result_t results, csi_result_list_t csi_results)
+char* result2JsonStr(result_t results, csi_result_list_t csi_results, sensor_data_t* sensor_data)
 {
     uint8_t mac[MAC_ADDRESS_LENGTH];
     esp_wifi_get_mac(ESP_IF_WIFI_STA, mac);
@@ -17,6 +18,11 @@ char* result2JsonStr(result_t results, csi_result_list_t csi_results)
     sprintf(macStr, "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     cJSON *results_json = cJSON_CreateObject();
     cJSON_AddStringToObject(results_json, "Device", macStr);
+
+    if (sensor_data->valid) {
+        cJSON_AddNumberToObject(results_json, "Temp", roundf(sensor_data->temperature_c));
+        cJSON_AddNumberToObject(results_json, "Pa", roundf(sensor_data->pressure_pa));
+    }
     //cJSON_AddStringToObject(results_json, "Timestamp", esp_log_system_timestamp());
     cJSON *result_array_json = cJSON_CreateArray();
 
