@@ -4,6 +4,9 @@
 #include <stdbool.h>
 #include "esp_err.h"
 #include "esp_wifi_types.h"
+#include "cJSON.h"
+#include "storage.h"
+
 
 typedef struct {
     uint16_t numOfScannedAP;
@@ -48,14 +51,22 @@ typedef struct {
     uint16_t max_len;
 } csi_result_list_t;
 
-esp_err_t wifiStaInit();
+esp_err_t wifiStaInit(control_t *control);
 scanResult_t wifiScanAllChannels();
 scanResult_t wifiScanActiveChannels(scanResult_t scanResult);
 result_t performFTM(scanResult_t scanResult);
+esp_err_t send_to_server(char *payload);
 void send_http_post(const char *url, char *payload);
 void wifi_csi_init();
 csi_result_list_t get_csi_results();
 esp_err_t joinAP( char *ssid, char *password );
 esp_err_t wifiStaDeInit();
+
+/**
+ * @brief   Sets the websocket adress to the server to send the data to. 
+ * @param char *server_adress: The adress of the server incl. port to send the data to. Ex. ws://example.com:8080/
+ */
+void set_ws_uri(char *server_adress);
+
 
 #endif

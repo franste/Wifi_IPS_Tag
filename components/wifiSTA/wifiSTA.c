@@ -11,16 +11,15 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "sdkconfig.h"
-
+#include "storage.h"
 #include <string.h>
 #include <stdlib.h>
 #include "rom/ets_sys.h"
 #include "cJSON.h"
 #include "esp_sntp.h"
 #include "esp_http_client.h"
-//#include "esp_tls.h"
+#include "esp_websocket_client.h"
 #include "esp_timer.h"
-#include "wifi_packets.h"
 #include "math.h"
 
 /* Length of mac adress*/
@@ -40,6 +39,16 @@ static uint32_t s_rtt_est, s_dist_est;
 #define MAX_HTTP_RECV_BUFFER 512
 #define MAX_HTTP_OUTPUT_BUFFER 1024
 
+/* Settings for Websocket*/
+static esp_websocket_client_handle_t ws_client = NULL;
+static esp_websocket_client_config_t websocket_cfg = {
+        .uri = CONFIG_DEV_SERVER_URL,
+        .keep_alive_enable = true,
+        .disable_auto_reconnect = false,
+        .network_timeout_ms = 2000,
+        .reconnect_timeout_ms = 1000,
+};
+
 /* Settings for Roaming*/
 #define WLAN_EID_NEIGHBOR_REPORT 52
 #define MAX_NEIGHBOR_LEN 512
@@ -48,17 +57,21 @@ static uint32_t s_rtt_est, s_dist_est;
 #define MEASURE_TYPE_LOCATION_CIVIC 11
 int rrm_ctx = 0;   // Context for RRM
 
-/* Settings for connecting*/
+/* Settings for connecting wifi*/
+static bool wifi_initialized = false;
 static esp_netif_t *sta_netif = NULL;
 static EventGroupHandle_t s_wifi_event_group;
 static const int CONNECTED_BIT = BIT0;
 static const int DISCONNECTED_BIT = BIT1;
-static const int GOT_IP_BIT = BIT2;
+static const int WS_CONNECTED_BIT = BIT2;
+
+/* Device control/settings*/
+static control_t *settings_control = NULL;
 
 // Tags for logging
-static const char *TAG_CSI = "csi_recv";
-static const char *TAG_STA = "Wifi";
-static const char *TAG_HTTP = "HTTP_POST";
+static const char *CSI = "csi recv";
+static const char *WIFI = "Wifi";
+static const char *WS = "Websocket";
 
 static const wifi_scan_config_t scanALl_config = {
     .ssid = NULL,
@@ -91,6 +104,165 @@ static int csi_result_list_size = INITIAL_CSI_RESULT_LIST_SIZE;
 static SemaphoreHandle_t mutex = NULL; // mutex for csi
 static csi_result_list_t csi_results; // csi result list 
 
+
+static void websocket_data_handler(cJSON *data_json_ptr) { 
+    bool update = false;
+    
+        if(cJSON_HasObjectItem(data_json_ptr, "settings")) {
+            cJSON *settings = cJSON_GetObjectItem(data_json_ptr, "settings");
+            if (settings != NULL) {
+                cJSON *url = cJSON_GetObjectItemCaseSensitive(settings, "url");
+                cJSON *ssid = cJSON_GetObjectItemCaseSensitive(settings, "ssid");
+                cJSON *password = cJSON_GetObjectItemCaseSensitive(settings, "password");
+                cJSON *username = cJSON_GetObjectItemCaseSensitive(settings, "username");
+                cJSON *interval = cJSON_GetObjectItemCaseSensitive(settings, "interval");
+                cJSON *log = cJSON_GetObjectItemCaseSensitive(settings, "log");
+                
+                //Url
+                if (cJSON_IsString(url) && (url->valuestring != NULL)) {
+                    cJSON *old_url = cJSON_GetObjectItemCaseSensitive(settings_control->settings_ptr, "url");
+                    if (cJSON_IsString(old_url) && (old_url->valuestring != NULL)) {
+                        if (strcmp(url->valuestring, old_url->valuestring) != 0) {
+                            update = true;
+                            cJSON_SetValuestring(old_url, url->valuestring);
+                        }
+                    }
+                }
+                //SSID
+                if (cJSON_IsString(ssid) && (ssid->valuestring != NULL)) {
+                    cJSON *old_ssid = cJSON_GetObjectItemCaseSensitive(settings_control->settings_ptr, "ssid");
+                    if (cJSON_IsString(old_ssid) && (old_ssid->valuestring != NULL)) {
+                        if (strcmp(ssid->valuestring, old_ssid->valuestring) != 0) {
+                            update = true;
+                            cJSON_SetValuestring(old_ssid, ssid->valuestring);
+                        }
+                    }
+                }
+                //Password
+                if (cJSON_IsString(password) && (password->valuestring != NULL)) {
+                    cJSON *old_password = cJSON_GetObjectItemCaseSensitive(settings_control->settings_ptr, "password");
+                    if (cJSON_IsString(old_password) && (old_password->valuestring != NULL)) {
+                        if (strcmp(password->valuestring, old_password->valuestring) != 0) {
+                            update = true;
+                            cJSON_SetValuestring(old_password, password->valuestring);
+                        }
+                    }
+                }
+                //Username
+                if (cJSON_IsString(username) && (username->valuestring != NULL)) {
+                    cJSON *old_username = cJSON_GetObjectItemCaseSensitive(settings_control->settings_ptr, "username");
+                    if (cJSON_IsString(old_username) && (old_username->valuestring != NULL)) {
+                        if (strcmp(username->valuestring, old_username->valuestring) != 0) {
+                            update = true;
+                            cJSON_SetValuestring(old_username, username->valuestring);
+                        }
+                    }
+                }
+                //Interval
+                if (cJSON_IsNumber(interval)) {
+                    cJSON *old_interval = cJSON_GetObjectItemCaseSensitive(settings_control->settings_ptr, "interval");
+                    if (cJSON_IsNumber(old_interval) && (interval->valueint != old_interval->valueint)) {
+                        update = true;
+                        cJSON_SetNumberValue(old_interval, interval->valueint);
+                    }
+                }
+                
+                //Log
+                if (cJSON_IsNumber(log)) {
+                    cJSON *old_log = cJSON_GetObjectItemCaseSensitive(settings_control->settings_ptr, "log");
+                    if (cJSON_IsNumber(old_log) && (old_log->valueint != log->valueint)) {
+                            switch (log->valueint) {
+                                case 0:
+                                    update = true;
+                                    esp_log_level_set("*", ESP_LOG_NONE);
+                                    cJSON_SetNumberValue(old_log, log->valueint);
+                                    break;
+                                case 1:
+                                    update = true;
+                                    esp_log_level_set("*", ESP_LOG_ERROR);
+                                    cJSON_SetNumberValue(old_log, log->valueint);
+                                    break;
+                                case 2:
+                                    update = true;
+                                    esp_log_level_set("*", ESP_LOG_WARN);
+                                    cJSON_SetNumberValue(old_log, log->valueint);
+                                    break;
+                                case 3:
+                                    update = true;
+                                    esp_log_level_set("*", ESP_LOG_INFO);
+                                    cJSON_SetNumberValue(old_log, log->valueint);
+                                    break;
+                                case 4:
+                                    update = true;
+                                    esp_log_level_set("*", ESP_LOG_DEBUG);
+                                    cJSON_SetNumberValue(old_log, log->valueint);
+                                    break;
+                                case 5:
+                                    update = true;
+                                    esp_log_level_set("*", ESP_LOG_VERBOSE);
+                                    cJSON_SetNumberValue(old_log, log->valueint);
+                                    break;
+                                default:
+                                    break;
+                            }          
+                    }
+                }
+                
+            }
+        }
+        if (update) {
+            ESP_LOGE(WS, "Settings updated - going to deep sleep soon...");
+            saveSettings(settings_control->settings_ptr);
+            if (esp_websocket_client_is_connected(ws_client)) {
+                ESP_LOGI(WS, "Comfirming settings update");
+                char msg[] = "{\"message\": \"Settings updated\"}";
+                esp_websocket_client_send_text(ws_client, msg, strlen(msg), portMAX_DELAY);
+            }
+            cJSON_Delete(data_json_ptr);
+            settings_control->interval = 0; // Short sleep for new settings to take effect.
+            settings_control->run_once = true; // Task run once so new settings can take effect.
+        } else {
+            cJSON_Delete(data_json_ptr);
+        }
+         xEventGroupSetBits(settings_control->task_event_group, settings_control->SETTINGS_NOT_UPDATING_BIT);
+}
+
+static void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
+{
+    esp_websocket_event_data_t *data = (esp_websocket_event_data_t *)event_data;
+    switch (event_id) {
+    case WEBSOCKET_EVENT_CONNECTED:
+        ESP_LOGI(WS, "WebSocket Connected");
+        xEventGroupSetBits(s_wifi_event_group, WS_CONNECTED_BIT);
+        break;
+
+    case WEBSOCKET_EVENT_DATA:
+        if (data->data_len > 0) {
+            // Process recieved data
+            if (xSemaphoreTake(settings_control->settings_mutex, portMAX_DELAY) == pdTRUE) {
+                xEventGroupClearBits(settings_control->task_event_group, settings_control->SETTINGS_NOT_UPDATING_BIT);
+                cJSON *data_json_ptr = cJSON_ParseWithLength(data->data_ptr, data->data_len);
+                if (data_json_ptr != NULL) websocket_data_handler(data_json_ptr);
+                xSemaphoreGive(settings_control->settings_mutex);
+            }
+        }
+        break;
+
+    case WEBSOCKET_EVENT_DISCONNECTED:
+        ESP_LOGI(WS, "WEBSOCKET_EVENT_DISCONNECTED");
+        if (ws_client != NULL && (s_wifi_event_group && CONNECTED_BIT)) {
+            ESP_LOGI(WS, "Reconnecting to websocket server");
+            esp_websocket_client_start(ws_client);
+        } else {
+            if (ws_client != NULL ) {
+                esp_websocket_client_destroy(ws_client);
+                ws_client = NULL;
+            }
+        }
+        break;
+    }
+}
+
 static void eventHandler(void *arg, esp_event_base_t event_base,
                          int32_t event_id, void *event_data)
 {
@@ -98,7 +270,7 @@ static void eventHandler(void *arg, esp_event_base_t event_base,
     {
         wifi_event_sta_connected_t *event = (wifi_event_sta_connected_t *)event_data;
 
-        ESP_LOGI(TAG_STA, "Connected to %s (BSSID: " MACSTR ", Channel: %d)", event->ssid,
+        ESP_LOGI(WIFI, "Connected to %s (BSSID: " MACSTR ", Channel: %d)", event->ssid,
                  MAC2STR(event->bssid), event->channel);
 
         // Sync time using SNTP
@@ -112,7 +284,7 @@ static void eventHandler(void *arg, esp_event_base_t event_base,
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED)
     {
         wifi_event_sta_disconnected_t *disconn = (wifi_event_sta_disconnected_t *)event_data;
-        ESP_LOGI(TAG_STA, "Disconnected from %s (BSSID: " MACSTR ", Reason: %d)", disconn->ssid,
+        ESP_LOGI(WIFI, "Disconnected from %s (BSSID: " MACSTR ", Reason: %d)", disconn->ssid,
                  MAC2STR(disconn->bssid), disconn->reason);
         if (disconn->reason == WIFI_REASON_ROAMING)
         {
@@ -120,10 +292,15 @@ static void eventHandler(void *arg, esp_event_base_t event_base,
 
         } else {
             xEventGroupClearBits(s_wifi_event_group, CONNECTED_BIT);
-            xEventGroupClearBits(s_wifi_event_group, GOT_IP_BIT);
+            xEventGroupClearBits(s_wifi_event_group, WS_CONNECTED_BIT);
+            //xEventGroupClearBits(s_wifi_event_group, GOT_IP_BIT);
             xEventGroupSetBits(s_wifi_event_group, DISCONNECTED_BIT);
-            esp_wifi_connect();
-            ESP_LOGI(TAG_STA, "retry to connect to the AP");
+            if (xEventGroupGetBits(settings_control->task_event_group) & settings_control->TASK_COMPLETED_BIT) {
+                // Do not reconnect if task completed
+            } else {
+                esp_wifi_connect();
+                ESP_LOGI(WIFI, "retry to connect to the AP");
+            }
         }
     }
     else if (event_id == WIFI_EVENT_FTM_REPORT)
@@ -140,14 +317,33 @@ static void eventHandler(void *arg, esp_event_base_t event_base,
         }
         else
         {
-            ESP_LOGI(TAG_STA, "FTM procedure with Peer(" MACSTR ") failed! (Status - %d)",
+            ESP_LOGI(WIFI, "FTM procedure with Peer(" MACSTR ") failed! (Status - %d)",
                      MAC2STR(event->peer_mac), event->status);
             xEventGroupSetBits(s_ftm_event_group, FTM_FAILURE_BIT);
         }
     }
     else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        xEventGroupSetBits(s_wifi_event_group, GOT_IP_BIT);
+        // Initialize websocket client and connect to server
+        ws_client = esp_websocket_client_init(&websocket_cfg);
+        esp_websocket_register_events(ws_client, WEBSOCKET_EVENT_ANY, websocket_event_handler, (void *)ws_client);
+        esp_websocket_client_start(ws_client);
+
     }
+    else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_LOST_IP) {
+        if (esp_websocket_client_is_connected(ws_client)) {
+            esp_websocket_client_stop(ws_client);
+            esp_websocket_client_destroy(ws_client);
+            ws_client = NULL;
+        } else if (ws_client != NULL) {
+            esp_websocket_client_destroy(ws_client);
+            ws_client = NULL;
+        }
+    }
+}
+
+void set_ws_uri(char *server_adress)
+{
+    websocket_cfg.uri = server_adress;
 }
 
 static inline uint32_t WPA_GET_LE32(const uint8_t *a)
@@ -173,7 +369,7 @@ static char * get_btm_neighbor_list(uint8_t *report, size_t report_len)
 #define NR_IE_MIN_LEN (MAC_ADDRESS_LENGTH + 4 + 1 + 1 + 1)
 
 	if (!report || report_len == 0) {
-		ESP_LOGI(TAG_STA, "RRM neighbor report is not valid");
+		ESP_LOGI(WIFI, "RRM neighbor report is not valid");
 		return NULL;
 	}
 
@@ -189,14 +385,14 @@ static char * get_btm_neighbor_list(uint8_t *report, size_t report_len)
 
 		if (pos[0] != WLAN_EID_NEIGHBOR_REPORT ||
 		    nr_len < NR_IE_MIN_LEN) {
-			ESP_LOGI(TAG_STA, "CTRL: Invalid Neighbor Report element: id=%u len=%u",
+			ESP_LOGI(WIFI, "CTRL: Invalid Neighbor Report element: id=%u len=%u",
 					data[0], nr_len);
 			ret = -1;
 			goto cleanup;
 		}
 
 		if (2U + nr_len > report_len) {
-			ESP_LOGI(TAG_STA, "CTRL: Invalid Neighbor Report element: id=%u len=%zu nr_len=%u",
+			ESP_LOGI(WIFI, "CTRL: Invalid Neighbor Report element: id=%u len=%zu nr_len=%u",
 					data[0], report_len, nr_len);
 			ret = -1;
 			goto cleanup;
@@ -240,7 +436,7 @@ static char * get_btm_neighbor_list(uint8_t *report, size_t report_len)
 			pos += s_len;
 		}
 
-		ESP_LOGI(TAG_STA, "RMM neigbor report bssid=" MACSTR
+		ESP_LOGI(WIFI, "RMM neigbor report bssid=" MACSTR
 				" info=0x%x op_class=%u chan=%u phy_type=%u%s%s%s%s",
 				MAC2STR(nr), WPA_GET_LE32(nr + MAC_ADDRESS_LENGTH),
 				nr[MAC_ADDRESS_LENGTH + 4], nr[MAC_ADDRESS_LENGTH + 5],
@@ -286,16 +482,16 @@ void neighbor_report_recv_cb(void *ctx, const uint8_t *report, size_t report_len
 	int cand_list = 0;
 
 	if (!report) {
-		ESP_LOGE(TAG_STA, "report is null");
+		ESP_LOGE(WIFI, "report is null");
 		return;
 	}
 	if (*val != rrm_ctx) {
-		ESP_LOGE(TAG_STA, "rrm_ctx value didn't match, not initiated by us");
+		ESP_LOGE(WIFI, "rrm_ctx value didn't match, not initiated by us");
 		return;
 	}
 	/* dump report info */
-	ESP_LOGI(TAG_STA, "rrm: neighbor report len=%d", report_len);
-	ESP_LOG_BUFFER_HEXDUMP(TAG_STA, pos, report_len, ESP_LOG_INFO);
+	ESP_LOGI(WIFI, "rrm: neighbor report len=%d", report_len);
+	ESP_LOG_BUFFER_HEXDUMP(WIFI, pos, report_len, ESP_LOG_INFO);
 
 	/* create neighbor list */
 	char *neighbor_list = get_btm_neighbor_list(pos + 1, report_len - 1);
@@ -315,54 +511,31 @@ static void esp_bss_rssi_low_handler(void* arg, esp_event_base_t event_base,
 {
 	wifi_event_bss_rssi_low_t *event = event_data;
 
-	ESP_LOGI(TAG_STA, "%s:bss rssi is=%d", __func__, event->rssi);
+	ESP_LOGI(WIFI, "%s:bss rssi is=%d", __func__, event->rssi);
 	/* Lets check channel conditions */
 	rrm_ctx++;
 	if (esp_rrm_send_neighbor_rep_request(neighbor_report_recv_cb, &rrm_ctx) < 0) {
 		/* failed to send neighbor report request */
-		ESP_LOGI(TAG_STA, "failed to send neighbor report request");
+		ESP_LOGI(WIFI, "failed to send neighbor report request");
 		if (esp_wnm_send_bss_transition_mgmt_query(REASON_FRAME_LOSS, NULL, 0) < 0) {
-			ESP_LOGI(TAG_STA, "failed to send btm query");
+			ESP_LOGI(WIFI, "failed to send btm query");
 		}
 	}
 }
 
-void send_http_post(const char *url, char *payload) {
-    //char output_buffer[MAX_HTTP_OUTPUT_BUFFER] = {0};   // Buffer to store response of http request
-    //int content_length = 0;
-    esp_http_client_config_t config = {
-        .url = url,
-        .timeout_ms = 1000,
-        .transport_type = HTTP_TRANSPORT_OVER_TCP,
-    };
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    esp_http_client_set_method(client, HTTP_METHOD_POST);
-    esp_http_client_set_header(client, "Content-Type", "application/json");
-    esp_err_t err = esp_http_client_open(client, strlen(payload));
-
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG_HTTP, "Failed to open HTTP connection: %s", esp_err_to_name(err));
-    } else {
-        int wlen = esp_http_client_write(client, payload, strlen(payload));
-        if (wlen < 0) {
-            ESP_LOGE(TAG_HTTP, "Write failed");
-        }
-        // content_length = esp_http_client_fetch_headers(client);
-        // if (content_length < 0) {
-        //     ESP_LOGE(TAG_HTTP, "HTTP client fetch headers failed");
-        // } else {
-        //     int data_read = esp_http_client_read_response(client, output_buffer, MAX_HTTP_OUTPUT_BUFFER);
-        //     if (data_read >= 0) {
-        //         ESP_LOGI(TAG_HTTP, "HTTP POST Status = %d, content_length = %lld",
-        //         esp_http_client_get_status_code(client),
-        //         esp_http_client_get_content_length(client));
-        //         ESP_LOG_BUFFER_HEX(TAG_HTTP, output_buffer, strlen(output_buffer));
-        //     } else {
-        //         ESP_LOGE(TAG_HTTP, "Failed to read response");
-        //     }
-        // }
+esp_err_t send_to_server(char *payload) {
+    if (!wifi_initialized) {
+        ESP_LOGE(WIFI, "wifi not initialized");
+        return ESP_FAIL;
     }
-    esp_http_client_cleanup(client);
+    if (esp_websocket_client_is_connected(ws_client)) {
+        ESP_LOGI(WS, "Sending data over websocket");
+        esp_websocket_client_send_text(ws_client, payload, strlen(payload), portMAX_DELAY);
+        return ESP_OK;
+    } else {
+        ESP_LOGE(WIFI, "Websocket not connected");
+        return ESP_FAIL;
+    }
 }
 
 scanResult_t wifiScanActiveChannels(scanResult_t scanResult)
@@ -380,17 +553,18 @@ scanResult_t wifiScanActiveChannels(scanResult_t scanResult)
 
     for (int i = 0; i < scanResult.uniqueChannelCount; i++)
     {
-        scan_config.channel = scanResult.uniqueChannels[i];
-        // esp_err_t err = esp_wifi_set_channel(scan_config.channel, WIFI_SECOND_CHAN_NONE);
-        // if (err != ESP_OK) {
-        //     ESP_LOGE("TEST", "esp_wifi_set_channel failed: %s", esp_err_to_name(err));
-        // }
-        // ESP_ERROR_CHECK(esp_wifi_set_bandwidth(ESP_IF_WIFI_STA, WIFI_BW_HT40));
-        // //create_probe_request_packet();
-        
-        ESP_ERROR_CHECK(esp_wifi_scan_start(&scan_config, true));
-        //vTaskDelay(1000 / portTICK_PERIOD_MS);
-        ESP_ERROR_CHECK(esp_wifi_scan_get_ap_num(&numAP));
+        scan_config.channel = scanResult.uniqueChannels[i];        
+        esp_err_t err = esp_wifi_scan_start(&scan_config, true);
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(WIFI, "Scan start failed");
+            return scanResult;
+        }
+        err = esp_wifi_scan_get_ap_num(&numAP);
+        if (err != ESP_OK) {
+            ESP_LOGE(WIFI, "Error getting number of APs: %s", esp_err_to_name(err));
+            return scanResult;
+        }
 
         if (scanResult.scannedApList == NULL)
         {
@@ -418,27 +592,23 @@ scanResult_t wifiScanActiveChannels(scanResult_t scanResult)
         }
         if (!scanResult.scannedApList)
         {
-            ESP_LOGE(TAG_STA, "Failed to allocate memory for scanned AP list");
+            ESP_LOGE(WIFI, "Failed to allocate memory for scanned AP list");
             scanResult.numOfScannedAP = 0;
             scanResult.uniqueChannelCount = 0;
             free(scanResult.scannedApList);
             free(scanResult.uniqueChannels);
             scanResult.scannedApList = NULL;
             scanResult.uniqueChannels = NULL;
-            //vTaskDelay(1000 / portTICK_PERIOD_MS);
-            //ssesp_wifi_set_csi(false);
             return scanResult;
         }
-        ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&numAP, (wifi_ap_record_t *)(scanResult.scannedApList + scanResult.numOfScannedAP)));
-        scanResult.numOfScannedAP += numAP;        
+        err = esp_wifi_scan_get_ap_records(&numAP, (wifi_ap_record_t *)(scanResult.scannedApList + scanResult.numOfScannedAP));
+        if (err == ESP_OK) scanResult.numOfScannedAP += numAP;        
     }
-    //esp_wifi_set_csi(false);
     return scanResult;
 }
 
 scanResult_t wifiScanAllChannels()
 {
-    // int64_t start = esp_timer_get_time();
     wifi_scan_config_t scan_config = scanALl_config;
     scanResult_t scanResult = {
         .numOfScannedAP = 0,
@@ -446,7 +616,12 @@ scanResult_t wifiScanAllChannels()
         .scannedApList = NULL,
         .uniqueChannels = NULL
     };
-    //esp_wifi_set_csi(true);
+
+    if (!wifi_initialized) {
+        ESP_LOGE(WIFI, "wifi not initialized");
+        return scanResult;
+    }
+
     if (ESP_OK == esp_wifi_scan_start(&scan_config, true)) {
         esp_wifi_scan_get_ap_num(&scanResult.numOfScannedAP);
         if (scanResult.numOfScannedAP > 0) {
@@ -525,14 +700,14 @@ static ftmResult_t startFtmSession(u_int8_t *bssid, u_int8_t channel)
     memcpy(ftmi_cfg.resp_mac, bssid, MAC_ADDRESS_LENGTH);
     ftmi_cfg.channel = channel;
 
-    ESP_LOGI(TAG_STA, "Requesting FTM session with Frm Count - %d, Burst Period - %dmSec (0: No Preference)",
+    ESP_LOGI(WIFI, "Requesting FTM session with Frm Count - %d, Burst Period - %dmSec (0: No Preference)",
              ftmi_cfg.frm_count, ftmi_cfg.burst_period * 100);
 
     //esp_wifi_set_channel(ftmi_cfg.channel, WIFI_SECOND_CHAN_ABOVE);
     esp_wifi_set_bandwidth(ESP_IF_WIFI_STA, WIFI_BW_HT40);
     if (ESP_OK != esp_wifi_ftm_initiate_session(&ftmi_cfg))
     {
-        ESP_LOGE(TAG_STA, "Failed to start FTM session");
+        ESP_LOGE(WIFI, "Failed to start FTM session");
         return ftmResult;
     }
 
@@ -559,6 +734,12 @@ result_t performFTM(scanResult_t scanResult) {
     result_t result;
     result.numOfResults = 0;
     result.ftmResultsList = NULL;
+    
+    if (!wifi_initialized) {
+        ESP_LOGE(WIFI, "wifi not initialized");
+        return result;
+    }
+    
     int i = 0;
     do
     {
@@ -567,7 +748,7 @@ result_t performFTM(scanResult_t scanResult) {
     } while (result.ftmResultsList == NULL || i > 5);
     if (!result.ftmResultsList)
     {
-        ESP_LOGE(TAG_STA, "Failed to allocate memory for FTM result list");
+        ESP_LOGE(WIFI, "Failed to allocate memory for FTM result list");
         free(result.ftmResultsList);
         result.ftmResultsList = NULL;
         result.numOfResults = 0;
@@ -612,13 +793,13 @@ static void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info)
     uint8_t mac[MAC_ADDRESS_LENGTH];
     esp_wifi_get_mac(ESP_IF_WIFI_STA, mac);
     if (memcmp(info->mac, mac, MAC_ADDRESS_LENGTH) == 0) {
-        //ESP_LOGE(TAG_CSI, "CSI data received channel: %d same mac: "MACSTR" - "MACSTR"", info->rx_ctrl.channel, MAC2STR(info->mac), MAC2STR(mac));
+        //ESP_LOGE(CSI, "CSI data received channel: %d same mac: "MACSTR" - "MACSTR"", info->rx_ctrl.channel, MAC2STR(info->mac), MAC2STR(mac));
         //Scource MAC is the same as the device MAC, Do Nothing.
         return;
     } else {
         vTaskDelay(10 / portTICK_PERIOD_MS); // Wait for subprocessing to finish, if it is running.
 
-        //ESP_LOGE(TAG_CSI, "CSI data received channel: %d different mac: "MACSTR" - "MACSTR" bandwith: %d", info->rx_ctrl.channel, MAC2STR(info->mac), MAC2STR(mac), info->rx_ctrl.cwb);
+        //ESP_LOGE(CSI, "CSI data received channel: %d different mac: "MACSTR" - "MACSTR" bandwith: %d", info->rx_ctrl.channel, MAC2STR(info->mac), MAC2STR(mac), info->rx_ctrl.cwb);
         csi_result_t csiResult;
         memcpy(csiResult.bssid, info->mac, MAC_ADDRESS_LENGTH);
         csiResult.noise_floor = info->rx_ctrl.noise_floor;
@@ -678,7 +859,7 @@ static void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info)
             csi_results.max_len++;
             csi_result_list_size = csi_results.max_len;
         } else {
-            ESP_LOGE(TAG_CSI, "CSI result list is full");
+            ESP_LOGE(CSI, "CSI result list is full");
         }
         xSemaphoreGive(mutex);
         return;
@@ -698,6 +879,7 @@ csi_result_list_t get_csi_results() {
     xSemaphoreGive(mutex);
     return results;
 }
+
 void wifi_csi_init()
 {
     
@@ -750,35 +932,45 @@ esp_err_t joinAP( char *ssid, char *password )
     ESP_ERROR_CHECK(esp_wifi_set_config(ESP_MAC_WIFI_STA, &wifi_cfg));
     esp_err_t err = esp_wifi_connect();
     if (err != ESP_OK) {
-        ESP_LOGE(TAG_STA, "Error connecting to AP: %s", esp_err_to_name(err));
+        ESP_LOGE(WIFI, "Error connecting to AP: %s", esp_err_to_name(err));
         return ESP_FAIL;
     } else {
         EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
-            GOT_IP_BIT | DISCONNECTED_BIT,
+            WS_CONNECTED_BIT | DISCONNECTED_BIT,
             pdFALSE,
             pdFALSE,
             portMAX_DELAY);
 
-        // If IP address is assigned
-        if (bits & GOT_IP_BIT) {
-            ESP_LOGI(TAG_STA, "Connected to AP");
+        // If websocket is connected, return success
+        if (bits & WS_CONNECTED_BIT) {
+            if (esp_websocket_client_is_connected(ws_client)) {
+                ESP_LOGI(WS, "Sending mac address to server");
+                char message[30];
+                uint8_t mac[MAC_ADDRESS_LENGTH];
+                esp_wifi_get_mac(ESP_IF_WIFI_STA, mac);
+                sprintf(message, "{\"Device\":\""MACSTR"\"}", MAC2STR(mac));
+                esp_websocket_client_send_text(ws_client, message, strlen(message), portMAX_DELAY);
+            }
+            return ESP_OK;
+
             return ESP_OK;
         } else if (bits & DISCONNECTED_BIT) {
-            ESP_LOGE(TAG_STA, "Failed to connect to AP");
+            ESP_LOGE(WIFI, "Failed to connect to AP");
             return ESP_FAIL;
         } else {
-            ESP_LOGE(TAG_STA, "UNEXPECTED EVENT");
+            ESP_LOGE(WIFI, "UNEXPECTED EVENT");
             return ESP_FAIL;
         }
     }
 }
 
-esp_err_t wifiStaInit(void)
+esp_err_t wifiStaInit(control_t *control)
 {
+    settings_control = control;
+
     const char *country = "SE";
     esp_log_level_set("wifi", ESP_LOG_WARN);
-    static bool initialized = false;
-    if (initialized)
+    if (wifi_initialized)
     {
         return ESP_OK;
     }
@@ -819,31 +1011,29 @@ esp_err_t wifiStaInit(void)
     ESP_ERROR_CHECK(esp_wifi_set_protocol(ESP_IF_WIFI_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR));
     ESP_ERROR_CHECK(esp_wifi_set_bandwidth(ESP_IF_WIFI_STA, WIFI_BW_HT40));
     ESP_ERROR_CHECK(esp_wifi_start());
-    initialized = true;
+
+    wifi_initialized = true;
     return ESP_OK;
 }
 
 esp_err_t wifiStaDeInit() 
 {
+    // Clean up websocket
+    esp_websocket_client_destroy(ws_client);
+    ws_client = NULL;
+
     esp_err_t err = esp_wifi_disconnect();
     if (err != ESP_OK) {
-        ESP_LOGE(TAG_STA, "Error disconnecting from AP: %s", esp_err_to_name(err));
+        ESP_LOGE(WIFI, "Error disconnecting from AP: %s", esp_err_to_name(err));
         return ESP_FAIL;
     } else {
-        EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
+        xEventGroupWaitBits(s_wifi_event_group,
             DISCONNECTED_BIT,
             pdFALSE,
             pdFALSE,
             portMAX_DELAY);
-
-        // If IP address is assigned
-        if (bits & DISCONNECTED_BIT) {
-            ESP_LOGI(TAG_STA, "Disconnected from AP");
-        } else {
-            ESP_LOGE(TAG_STA, "UNEXPECTED EVENT");
-            return ESP_FAIL;
-        }
     }
+    wifi_initialized = false;
     return esp_wifi_stop();
 }
 

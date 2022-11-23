@@ -12,10 +12,12 @@
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "esp_sleep.h"
 #include "spi_bmp390.h"
-//#include "spi_bmp390_test.h"
+#include "esp_event.h"
+
 
 //#define PRODUCTION true
 #define SENSOR_BMP390 true
@@ -23,31 +25,34 @@
 #define MIN_FTM_RESULTS 1
 #define FACTOR_us_TO_s 1000000
 
-static cJSON *p_settings;
-static bool run_once = false;
-static TaskHandle_t main_task_handle = NULL;
-
-static EventGroupHandle_t s_task_event_group;
-static const int TASK_COMPLETED_BIT = BIT0;
 
 static bool sensor_bmp390 = SENSOR_BMP390;
+
+static control_t control = {
+    .settings_ptr = NULL,
+    .run_once = false,
+    .main_task_handle = NULL,
+    .task_event_group = NULL,
+    .TASK_COMPLETED_BIT = BIT0,
+    .SETTINGS_NOT_UPDATING_BIT = BIT1
+};
+
 
 // Default settings for the device
 static cJSON* useDefaultSettings(void) {
     cJSON *settings_json = cJSON_CreateObject();
-    cJSON_AddStringToObject(settings_json, "server_url", CONFIG_DEV_SERVER_URL);
-    cJSON_AddStringToObject(settings_json, "connect_to_ap_ssid", CONFIG_DEV_WIFI_SSID);
-    cJSON_AddStringToObject(settings_json, "connect_to_ap_password", CONFIG_DEV_WIFI_PASSWORD);
+    cJSON_AddStringToObject(settings_json, "url", CONFIG_DEV_SERVER_URL);
+    cJSON_AddStringToObject(settings_json, "ssid", CONFIG_DEV_WIFI_SSID);
+    cJSON_AddStringToObject(settings_json, "password", CONFIG_DEV_WIFI_PASSWORD);
     cJSON_AddNumberToObject(settings_json, "interval", 0); // 0 = send data as soon as possible (seconds)
+    cJSON_AddNumberToObject(settings_json, "log", ESP_LOG_INFO); // 0 = no logging, 1 = error, 2 = warning, 3 = info, 4 = debug
+    cJSON_AddBoolToObject(settings_json, "repl", cJSON_True);
+
     return settings_json;
 }
 
-
-
 void main_task(void *pvParameter)
 {
-    xEventGroupClearBits(s_task_event_group, TASK_COMPLETED_BIT);
-
     do {
         /* Scanning all channels*/
         scanResult_t scanResult = wifiScanAllChannels();
@@ -63,14 +68,14 @@ void main_task(void *pvParameter)
 
             char* results_json_str = result2JsonStr(result, csi_result_list, &sensor_data); // Convert the results to a JSON string
             
-            // HTTP POST to server
+            // Send the results to the server
             vTaskDelay(10 / portTICK_PERIOD_MS); // Wait for subprocessing to finish, if it is running.
-            send_http_post(cJSON_GetObjectItemCaseSensitive(p_settings, "server_url")->valuestring, results_json_str);
+            send_to_server(results_json_str);
             free(results_json_str);
             free(csi_result_list.list);
 
             /* Scanning only channels found in all scan*/
-            while (result.numOfFtmResponders >=  MIN_FTM_RESULTS && !run_once) {
+            while (result.numOfFtmResponders >=  MIN_FTM_RESULTS && !control.run_once) {
                 vTaskDelay(10 / portTICK_PERIOD_MS); // Wait for subprocessing to finish, if it is running.
                 int start = esp_timer_get_time();
                 if (result.ftmResultsList != NULL) {
@@ -92,26 +97,30 @@ void main_task(void *pvParameter)
                     }
 
                     char* results_json_str = result2JsonStr(result, csi_result_list, &sensor_data); // Convert the results to a JSON string
+                    send_to_server(results_json_str); // Send the results to the server
                     
-                    //HTTP POST to server
-                    //vTaskDelay(10 / portTICK_PERIOD_MS); // Wait for subprocessing to finish, if it is running.
-                    send_http_post(cJSON_GetObjectItemCaseSensitive(p_settings, "server_url")->valuestring, results_json_str);
+                    // Free memory
                     free(results_json_str);
                     free(csi_result_list.list);
+
+                    // Statistics for debugging
                     int end = esp_timer_get_time();
                     int heap = esp_get_free_heap_size();
                     ESP_LOGI("main", "Loop took %d ms heapsize: %d", (end - start) / 1000, heap);
+
                 } else {
                     break;
                 }
             }
-            if (run_once) ESP_LOGI("main", "Task stopped");
+            if (control.run_once) ESP_LOGI("main", "Task finished");
             else ESP_LOGI("main", "No more FTM results, WIFI scan ALL channels now");
 
         } else {
             ESP_LOGI("main", "No APs found\n");
         }
         vTaskDelay(10 / portTICK_PERIOD_MS); // Wait for subprocessing to finish, if it is running.
+
+        // Clean up memory
         if (scanResult.scannedApList != NULL) {
             free(scanResult.scannedApList);
             scanResult.scannedApList = NULL;
@@ -122,9 +131,13 @@ void main_task(void *pvParameter)
             scanResult.uniqueChannels = NULL;
             scanResult.uniqueChannelCount = 0;
         }
-    } while (!run_once);
-    xEventGroupSetBits(s_task_event_group, TASK_COMPLETED_BIT);
-    vTaskDelete(main_task_handle);
+
+    } while (!control.run_once);
+
+    // Task completed
+    xEventGroupWaitBits(control.task_event_group, control.SETTINGS_NOT_UPDATING_BIT, false, true, portMAX_DELAY);
+    xEventGroupSetBits(control.task_event_group, control.TASK_COMPLETED_BIT);
+    vTaskDelete(control.main_task_handle);
 
 } 
 
@@ -135,15 +148,29 @@ void app_main(void)
     if (err != ESP_OK) {
         printf("Failed to initialize NVS");
     }
-    // load settings from NVS
-    p_settings = readSettings();
-    if (p_settings == NULL)
-    {
-        printf("No settings file found, using default settings\n");
-        p_settings = useDefaultSettings();
+
+    // Initialize the control struct
+    control.settings_ptr = readSettings(); // load settings from NVS
+    control.settings_mutex = xSemaphoreCreateMutex();
+    control.task_event_group = xEventGroupCreate();
+     
+     // If no settings are found, uce default settings
+    if (control.settings_ptr == NULL) {
+        ESP_LOGE("main", "No settings found, using default settings");
+        control.settings_ptr = useDefaultSettings();
     }
-    p_settings = useDefaultSettings(); // Use default settings
+    control.interval = cJSON_GetObjectItemCaseSensitive(control.settings_ptr, "interval")->valueint;
     
+    // set the interval before deep sleep. If 0, no deep sleep
+    if (control.interval > 0) control.run_once = true; // Run task only once
+    else control.run_once = false; // Run task continuously
+
+    xEventGroupClearBits(control.task_event_group, control.TASK_COMPLETED_BIT);
+    xEventGroupSetBits(control.task_event_group, control.SETTINGS_NOT_UPDATING_BIT);
+
+    // Set log level
+    esp_log_level_set("*", cJSON_GetObjectItem(control.settings_ptr, "log")->valueint);
+
     // Initialize & configure BMP390
     if (sensor_bmp390) {
         err = spi_bmp390_init();
@@ -160,49 +187,56 @@ void app_main(void)
     }
 
     // Initialize the Wifi
-    ESP_ERROR_CHECK(wifiStaInit());
+    ESP_ERROR_CHECK(wifiStaInit(&control));
 
     // Initialize the CSI
     wifi_csi_init();
 
-    // Set default Logging level. Can be changed via REPL
-    esp_log_level_set("*", ESP_LOG_NONE);
+    //Start the REPL
+    cJSON *repl_json = cJSON_GetObjectItemCaseSensitive(control.settings_ptr, "repl");
+    if (cJSON_IsBool(repl_json) && cJSON_IsTrue(repl_json)) {
+        ESP_LOGE("main", "Starting REPL");
+        xEventGroupClearBits(control.task_event_group, control.SETTINGS_NOT_UPDATING_BIT);
+        repl(&control);
+    }
+    // Wait for the settings to be updated in REPL
+    xEventGroupWaitBits(control.task_event_group, control.SETTINGS_NOT_UPDATING_BIT, false, true, portMAX_DELAY);
 
-    // Start the REPL
-    repl(p_settings);
 
     // Join Ap
     joinAP(
-        cJSON_GetObjectItemCaseSensitive(p_settings, "connect_to_ap_ssid")->valuestring, 
-        cJSON_GetObjectItemCaseSensitive(p_settings, "connect_to_ap_password")->valuestring
+        cJSON_GetObjectItemCaseSensitive(control.settings_ptr, "ssid")->valuestring, 
+        cJSON_GetObjectItemCaseSensitive(control.settings_ptr, "password")->valuestring
     );
 
-    // Create the task event group
-    s_task_event_group = xEventGroupCreate();
-
     // Start the main task
-    TaskHandle_t main_task_handle = NULL;
-    cJSON *interval_json = cJSON_GetObjectItemCaseSensitive(p_settings, "interval");
-    int interval = 0; // time in minutes
-    if (cJSON_IsNumber(interval_json)) interval = cJSON_GetObjectItemCaseSensitive(p_settings, "interval")->valueint;
+    xTaskCreatePinnedToCore(&main_task, "tag_task", 4096, NULL, 5, &control.main_task_handle, 1); // Run on core 1
+
+    // Wait for task to complete
+    xEventGroupWaitBits(control.task_event_group, control.TASK_COMPLETED_BIT | control.SETTINGS_NOT_UPDATING_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
     
-    if (interval > 0) run_once = true; // Run task only once
-    else run_once = false; // Run task continuously
-
-    xTaskCreatePinnedToCore(&main_task, "tag_task", 4096, NULL, 5, &main_task_handle, 1); // Run on core 1
-
-    xEventGroupWaitBits(s_task_event_group, TASK_COMPLETED_BIT, pdTRUE, pdTRUE, portMAX_DELAY); // Wait for task to complete
-
+    // Go to deep sleep
     int since_boot_time = esp_timer_get_time();
     ESP_LOGI("MAIN", "Task completed, time since boot %d ms, going to sleep now!!!", since_boot_time / 1000);
-    esp_sleep_enable_timer_wakeup(FACTOR_us_TO_s * 60 * interval - since_boot_time); // Sleep for interval - time since boot
     wifiStaDeInit();
+
+    // Set deep sleep time. Interval is in minutes.
+    if (control.interval > 0) {
+        esp_sleep_enable_timer_wakeup(FACTOR_us_TO_s * 60 * control.interval - since_boot_time);
+    } else {
+        esp_sleep_enable_timer_wakeup(FACTOR_us_TO_s * 5); // 5 seconds
+    }
+
     esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH,   ESP_PD_OPTION_AUTO);
     //esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_AUTO);
     //esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_AUTO);
     esp_sleep_pd_config(ESP_PD_DOMAIN_XTAL,         ESP_PD_OPTION_AUTO);
-    esp_sleep_enable_timer_wakeup(FACTOR_us_TO_s * 60 * interval - since_boot_time); // Sleep for interval - time since boot
 
+    // Debugging
+    int heap = esp_get_free_heap_size();
+    int min_heap = esp_get_minimum_free_heap_size();
+    ESP_LOGE("MAIN", "Free heap: %d, min heap: %d", heap, min_heap);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
     esp_deep_sleep_start();  // Go to sleep
 }
  

@@ -14,7 +14,9 @@
 
 
 // Global variables
-cJSON *settings_json;
+static cJSON *settings_json;
+static control_t *settings_control;
+
 
 typedef struct {
     struct arg_str *level;
@@ -43,11 +45,17 @@ typedef struct {
     struct arg_end *end;
 } interval_arg_t;
 
+typedef struct {
+    struct arg_str *repl;
+    struct arg_end *end;
+} repl_arg_t;
+
 static log_level_arg_t log_level_args;
 static ap_arg_t ap_args;
 static url_arg_t url_args;
 static device_arg_t device_args;
 static interval_arg_t interval_args;
+static repl_arg_t repl_args;
 
 //Prints device information
 void deviceInfo(void)
@@ -156,37 +164,37 @@ static int set_AP(int argc, char **argv)
         return 1;
     }
     if ( ap_args.ssid != NULL ) {
-        cJSON *ssid = cJSON_GetObjectItemCaseSensitive(settings_json, "connect_to_ap_ssid");
+        cJSON *ssid = cJSON_GetObjectItemCaseSensitive(settings_json, "ssid");
         if (cJSON_IsString(ssid) && (ssid->valuestring != NULL)) {
             cJSON_SetValuestring(ssid, ap_args.ssid->sval[0]);
         } else {
-            cJSON_AddStringToObject(settings_json, "connect_to_ap_ssid", ap_args.ssid->sval[0]);
+            cJSON_AddStringToObject(settings_json, "ssid", ap_args.ssid->sval[0]);
         }
     }
     if ( ap_args.password != NULL ) {
-        cJSON *password = cJSON_GetObjectItemCaseSensitive(settings_json, "connect_to_ap_password");
+        cJSON *password = cJSON_GetObjectItemCaseSensitive(settings_json, "password");
         if (cJSON_IsString(password) && (password->valuestring != NULL)) {
             cJSON_SetValuestring(password, ap_args.password->sval[0]);
         } else {
-            cJSON_AddStringToObject(settings_json, "connect_to_ap_password", ap_args.password->sval[0]);
+            cJSON_AddStringToObject(settings_json, "password", ap_args.password->sval[0]);
         }
     }
     if (strcmp(ap_args.username->sval[0], "") == 0) {
-        cJSON *username = cJSON_GetObjectItemCaseSensitive(settings_json, "connect_to_ap_username");
+        cJSON *username = cJSON_GetObjectItemCaseSensitive(settings_json, "username");
         if (cJSON_IsString(username) && (username->valuestring != NULL)) {
-            cJSON_DeleteItemFromObject(settings_json, "connect_to_ap_username");
+            cJSON_SetValuestring(username, "NULL");
         }   
     } else if ( ap_args.username != NULL ) {
-        cJSON *username = cJSON_GetObjectItemCaseSensitive(settings_json, "connect_to_ap_username");
+        cJSON *username = cJSON_GetObjectItemCaseSensitive(settings_json, "username");
         if (cJSON_IsString(username) && (username->valuestring != NULL)) {
             cJSON_SetValuestring(username, ap_args.username->sval[0]);
         } else {
-            cJSON_AddStringToObject(settings_json, "connect_to_ap_username", ap_args.username->sval[0]);
+            cJSON_AddStringToObject(settings_json, "username", ap_args.username->sval[0]);
         }   
     } else {
-        cJSON *username = cJSON_GetObjectItemCaseSensitive(settings_json, "connect_to_ap_username");
+        cJSON *username = cJSON_GetObjectItemCaseSensitive(settings_json, "username");
         if (cJSON_IsString(username) && (username->valuestring != NULL)) {
-            cJSON_DeleteItemFromObject(settings_json, "connect_to_ap_username");
+            cJSON_DeleteItemFromObject(settings_json, "username");
         }
     }
     esp_err_t err = saveSettings(settings_json);
@@ -240,20 +248,46 @@ static int set_interval(int argc, char **argv)
     return 0;
 }
 
+static int set_repl(int argc, char **argv) {
+    int nerrors = arg_parse(argc, argv, (void **) &repl_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, repl_args.end, argv[0]);
+        return 1;
+    }
+    if ( repl_args.repl != NULL ) {
+        if(strcmp(repl_args.repl->sval[0], "y") == 0) { 
+                cJSON *c_true = cJSON_CreateTrue();
+                cJSON_ReplaceItemInObject(settings_json, "repl", c_true); 
+                esp_err_t err = saveSettings(settings_json);
+                if (err != ESP_OK) printf("Error (%s) reading data from NVS!\n", esp_err_to_name(err));
+                else printf("New settings saved\n");
+                fflush(stdout);        
+        }
+    }
+    return 0;
+}
+
+static int start_tag(int argc, char **argv) {
+        xEventGroupSetBits(settings_control->task_event_group , settings_control->SETTINGS_NOT_UPDATING_BIT);
+        return 0;
+}
+
 static void print_menu()
 {
-    printf("\n ============================================================\n");
-    printf(" |                WIFI Indoor Position Tag                  |\n");
-    printf(" |                                                          |\n");
-    printf(" |  1. 'help' for detailed information on parameters        |\n");
-    printf(" |  2. 'settings' to show current settings                  |\n");
-    printf(" |  3. 'log <none|error|warning|info>' to set log level     |\n");
-    printf(" |  4. 'ap <ssid> <password> <username>' ap to connect to   |\n");
-    printf(" |  5. 'server <url>' a url to post json to                 |\n");
-    printf(" |  6. 'interval <minutes>' set the loop time               |\n");
-    printf(" |  7. 'device <name>' set the nickname of the device       |\n");
-    printf(" |  8. 'menu' to show menu                                  |\n");
-    printf(" ============================================================\n");
+    printf("\n ====================================================================\n");
+    printf(" |                WIFI Indoor Position Tag                          |\n");
+    printf(" |                                                                  |\n");
+    printf(" |  1. 'help' for detailed information on parameters                |\n");
+    printf(" |  2. 'settings' to show current settings                          |\n");
+    printf(" |  3. 'log <none|error|warning|info>' to set log level             |\n");
+    printf(" |  4. 'ap <ssid> <password> <username>' ap to connect to           |\n");
+    printf(" |  5. 'server <url>' a url to post json to                         |\n");
+    printf(" |  6. 'interval <minutes>' set the loop time                       |\n");
+    printf(" |  7. 'device <name>' set the nickname of the device               |\n");
+    printf(" |  8. 'menu' to show menu                                          |\n");
+    printf(" |  8. 'repl' < [y]es or [n]o > REPL on next reboot (default is no) |\n");
+    printf(" |  8. 'start' to start the tag                                     |\n");
+    printf(" =======================================================================\n");
     fflush(stdout);
 
 }
@@ -351,6 +385,29 @@ static void register_settings()
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&menu_cmd) );
 
+    //Input to set REPL
+    repl_args.repl = arg_str0(NULL, NULL, "[y]es [n]o", "REPL on next reboot");
+    repl_args.end = arg_end(1);
+
+    //Input to set REPL
+    const esp_console_cmd_t repl_cmd = {
+        .command = "repl",
+        .help = "Set REPL on next reboot",
+        .hint = NULL,
+        .func = &set_repl,
+        .argtable = &repl_args
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&repl_cmd) );
+
+    //Input to start tag
+    const esp_console_cmd_t start_cmd = {
+        .command = "start",
+        .help = "Start tag",
+        .hint = NULL,
+        .func = &start_tag,
+    };
+    ESP_ERROR_CHECK( esp_console_cmd_register(&start_cmd) );
+
 }
 
 static void startupMenu()
@@ -373,9 +430,19 @@ static void startupMenu()
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
 }
 
-void repl(cJSON *pSettings)
+void repl(control_t *control)
 {
-    settings_json = pSettings;
+    settings_json = control->settings_ptr;
+    settings_control = control;
+    
+    // Turn off REPL on next boot.
+    cJSON *c_false = cJSON_CreateFalse();
+    cJSON_ReplaceItemInObject(settings_json, "repl", c_false);    
+    saveSettings(settings_json);
+    
+    // Show device info
     deviceInfo();
+
+    // Show menu
     startupMenu();
 }

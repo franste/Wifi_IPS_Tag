@@ -2,7 +2,9 @@
 #define REPL_H
 
 #include "cJSON.h"
+#include "storage.h"
 
-void repl(cJSON *pSettings);
+
+void repl(control_t  *control);
 
 #endif
