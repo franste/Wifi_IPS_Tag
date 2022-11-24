@@ -44,6 +44,7 @@ static cJSON* useDefaultSettings(void) {
     cJSON_AddStringToObject(settings_json, "url", CONFIG_DEV_SERVER_URL);
     cJSON_AddStringToObject(settings_json, "ssid", CONFIG_DEV_WIFI_SSID);
     cJSON_AddStringToObject(settings_json, "password", CONFIG_DEV_WIFI_PASSWORD);
+    cJSON_AddStringToObject(settings_json, "username", CONFIG_DEV_WIFI_USERNAME);
     cJSON_AddNumberToObject(settings_json, "interval", 0); // 0 = send data as soon as possible (seconds)
     cJSON_AddNumberToObject(settings_json, "log", ESP_LOG_INFO); // 0 = no logging, 1 = error, 2 = warning, 3 = info, 4 = debug
     cJSON_AddBoolToObject(settings_json, "repl", cJSON_True);

@@ -21,6 +21,9 @@
 #include "esp_websocket_client.h"
 #include "esp_timer.h"
 #include "math.h"
+#include "esp_wpa2.h"
+#include "esp_netif.h"
+#include "esp_system.h"
 
 /* Length of mac adress*/
 #define MAC_ADDRESS_LENGTH 6
@@ -913,7 +916,6 @@ esp_err_t joinAP( char *ssid, char *password )
     wifi_config_t wifi_cfg = {
         .sta = {
             .ssid = CONFIG_DEV_WIFI_SSID,
-            .password = CONFIG_DEV_WIFI_PASSWORD,
             .scan_method = WIFI_FAST_SCAN,
             .rm_enabled = 1,
             .pmf_cfg = {
@@ -926,6 +928,10 @@ esp_err_t joinAP( char *ssid, char *password )
     };
     strcpy((char *)wifi_config.sta.ssid, ssid);
     strcpy((char *)wifi_config.sta.password, password);
+    ESP_ERROR_CHECK( esp_wifi_sta_wpa2_ent_set_username((uint8_t *)CONFIG_DEV_WIFI_USERNAME, strlen(CONFIG_DEV_WIFI_USERNAME)) );
+    ESP_ERROR_CHECK( esp_wifi_sta_wpa2_ent_set_password((uint8_t *)CONFIG_DEV_WIFI_PASSWORD, strlen(CONFIG_DEV_WIFI_PASSWORD)) );
+    ESP_ERROR_CHECK( esp_wifi_sta_wpa2_ent_enable() );
+
     ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_cfg));
     ESP_ERROR_CHECK(esp_wifi_set_channel(1, WIFI_SECOND_CHAN_ABOVE));   // Dosent seem to be able to force bandwidth to 40mhz, so FTM is only 20mhz
     ESP_ERROR_CHECK(esp_wifi_set_bandwidth(ESP_IF_WIFI_STA, WIFI_BW_HT40));
