@@ -7,7 +7,7 @@
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 
-typedef struct {
+typedef struct control_s{
     cJSON *settings_ptr;
     SemaphoreHandle_t settings_mutex;
     bool run_once;
