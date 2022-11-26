@@ -1,0 +1,148 @@
+menu "Application Wifi Indoor Position system"
+    
+    choice 
+        prompt "Select the enviroment mode"
+        config PRODUCTION_MODE
+            bool "Production mode"
+            help
+                This mode is used to configure the system in production mode.
+                In this mode the system will be configured to use the
+                production server.
+                
+        config DEVELOPMENT_MODE_FACTORY
+            bool "Development mode (factory)"
+            help
+                This option enables the development mode for the factory enviroment. In this mode,
+                the system will be using the factory default configuration.
+                
+        config DEVELOPMENT_MODE_LAB
+            bool "Development mode (lab)"
+            help
+                This option enables the development mode for the lab enviroment. In this mode,
+                the system will be using the lab default configuration.
+                                
+    endchoice
+    
+    menu "WIPS Esp32S3 softAP config"
+    config WIP_AP_SSID
+        string "SSID of the WIPS Anchor AP"
+        default "WIPSAnchor"
+        help
+            This option sets the SSID of the Wifi network in production mode.
+            
+    config WIP_AP_PASSWORD
+        string "Password of the WIPS Anchors AP"
+        default "WIPSPassword"
+        help
+            This option sets the password of the Wifi network in production mode.
+    
+    config WIP_AP_CHANNEL
+        int "Channel of the WIPS Anchor AP"
+        range 1 14
+        default 1 
+        help
+            This option sets the channel to first search for AP in.   
+
+    endmenu
+
+    menu "WIPS Station config (production mode)"
+        depends on PRODUCTION_MODE
+        config WIP_PRODUCTION_STA_SSID
+            string "SSID of the wifi network"
+            default "Production_SSID"
+            help
+                This option sets the SSID of the Wifi network in production mode.
+
+        config WIP_PRODUCTION_STA_USERNAME
+            depends on !DEVELOPMENT_MODE_LAB
+            string "Username of the wifi network"
+            default "Production_Username"
+            help
+                This option sets the username of the Wifi network in production mode.
+
+        config WIP_PRODUCTION_STA_PASSWORD
+            string "Password of the wifi network"
+            default "Production_Password"
+            help
+                This option sets the password of the Wifi network in production mode.
+
+        config WIP_PRODUCTION_STA_CHANNEL
+            int "Channel of the wifi network"
+            range 1 14
+            default 1 
+            help
+                This option sets the channel to first search for AP in.
+
+        config WIP_PRODUCTION_STA_SERVER_URL
+            string "Url to the server"
+            default "ws://serveraddress:8080" 
+            help
+                This option sets the server url to send data to. 
+    endmenu
+
+    menu "WIPS Station config (development factory mode)"
+        depends on DEVELOPMENT_MODE_FACTORY
+        config WIP_DEVELOPMENT_FACTORY_STA_SSID
+            string "SSID of the wifi network"
+            default "Development_FACTORY_SSID" 
+            help
+                This option sets the SSID of the Wifi network in production mode.
+
+        config WIP_DEVELOPMENT_FACTORY_STA_USERNAME
+            depends on !DEVELOPMENT_MODE_LAB
+            string "Username of the wifi network"
+            default "Development_FACTORY_Username"
+            help
+                This option sets the username of the Wifi network in production mode.
+
+        config WIP_DEVELOPMENT_FACTORY_STA_PASSWORD
+            string "Password of the wifi network"
+            default "Development_FACTORY_Password"
+            help
+                This option sets the password of the Wifi network in production mode.
+
+        config WIP_DEVELOPMENT_FACTORY_STA_CHANNEL
+            int "Channel of the wifi network"
+            range 1 14
+            default 1 
+            help
+                This option sets the channel to first search for AP in.
+
+        config WIP_DEVELOPMENT_FACTORY_STA_SERVER_URL
+            string "Url to the server"
+            default "ws://serveraddress:8080"
+            help
+                This option sets the server url to send data to.
+    endmenu
+
+    menu "WIPS Station config (development lab mode)"
+        depends on DEVELOPMENT_MODE_LAB
+        config WIP_DEVELOPMENT_LAB_SSID
+            string "SSID of the wifi network"
+            default "Development_LAB_SSID"
+            help
+                This option sets the SSID of the Wifi network in production mode.
+
+        config WIP_DEVELOPMENT_LAB_STA_PASSWORD
+            string "Password of the wifi network"
+            default "Development_LAB_Password"
+            default ""
+            help
+                This option sets the password of the Wifi network in production mode.
+
+        config WIP_DEVELOPMENT_LAB_STA_CHANNEL
+            int "Channel of the wifi network"
+            range 1 14
+            default 1 
+            help
+                This option sets the channel to first search for AP in.
+
+        config WIP_DEVELOPMENT_LAB_STA_SERVER_URL
+            string "Url to the server"
+            default "ws://serveraddress:8080"
+            help
+                This option sets the server url to send data to.
+    endmenu
+    
+endmenu
+            
