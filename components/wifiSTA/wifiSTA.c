@@ -45,7 +45,6 @@ static uint32_t s_rtt_est, s_dist_est;
 /* Settings for Websocket*/
 static esp_websocket_client_handle_t ws_client = NULL;
 static esp_websocket_client_config_t websocket_cfg = {
-        .uri = CONFIG_DEV_SERVER_URL,
         .keep_alive_enable = true,
         .disable_auto_reconnect = false,
         .network_timeout_ms = 2000,
@@ -87,17 +86,16 @@ static const wifi_scan_config_t scanALl_config = {
 };
 
 static wifi_config_t wifi_config = {
-    .sta = {
-        .ssid = CONFIG_DEV_WIFI_SSID,
-        .password = CONFIG_DEV_WIFI_PASSWORD,
-        .rm_enabled = 1,
-        .pmf_cfg = {
-            .capable = true,
-            .required = false},
-        .btm_enabled = 1,
-        .mbo_enabled = 1,
-        .ft_enabled = 1,
-    },
+        .sta = {
+            .scan_method = WIFI_FAST_SCAN,
+            .rm_enabled = 1,
+            .pmf_cfg = {
+                .capable = true,
+                .required = false},
+            .btm_enabled = 1,
+            .mbo_enabled = 1,
+            .ft_enabled = 1,
+        },
 };
 
 //CSI
@@ -911,31 +909,11 @@ void wifi_csi_init()
     mutex = xSemaphoreCreateMutex();
 }
 
-esp_err_t joinAP( char *ssid, char *password )
+esp_err_t joinAP()
 {
-    wifi_config_t wifi_cfg = {
-        .sta = {
-            .ssid = CONFIG_DEV_WIFI_SSID,
-            .scan_method = WIFI_FAST_SCAN,
-            .rm_enabled = 1,
-            .pmf_cfg = {
-                .capable = true,
-                .required = false},
-            .btm_enabled = 1,
-            .mbo_enabled = 1,
-            .ft_enabled = 1,
-        },
-    };
-    strcpy((char *)wifi_config.sta.ssid, ssid);
-    strcpy((char *)wifi_config.sta.password, password);
-    ESP_ERROR_CHECK( esp_wifi_sta_wpa2_ent_set_username((uint8_t *)CONFIG_DEV_WIFI_USERNAME, strlen(CONFIG_DEV_WIFI_USERNAME)) );
-    ESP_ERROR_CHECK( esp_wifi_sta_wpa2_ent_set_password((uint8_t *)CONFIG_DEV_WIFI_PASSWORD, strlen(CONFIG_DEV_WIFI_PASSWORD)) );
-    ESP_ERROR_CHECK( esp_wifi_sta_wpa2_ent_enable() );
-
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_cfg));
     ESP_ERROR_CHECK(esp_wifi_set_channel(1, WIFI_SECOND_CHAN_ABOVE));   // Dosent seem to be able to force bandwidth to 40mhz, so FTM is only 20mhz
     ESP_ERROR_CHECK(esp_wifi_set_bandwidth(ESP_IF_WIFI_STA, WIFI_BW_HT40));
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_MAC_WIFI_STA, &wifi_cfg));
+    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_MAC_WIFI_STA, &wifi_config));
     esp_err_t err = esp_wifi_connect();
     if (err != ESP_OK) {
         ESP_LOGE(WIFI, "Error connecting to AP: %s", esp_err_to_name(err));
@@ -1012,10 +990,28 @@ esp_err_t wifiStaInit(control_t *control)
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+
+    memcpy(wifi_config.sta.ssid, cJSON_GetObjectItem(settings_control->settings_ptr, "ssid")->valuestring, strlen(cJSON_GetObjectItem(settings_control->settings_ptr, "ssid")->valuestring));
+    
+    if (cJSON_HasObjectItem(settings_control->settings_ptr, "username")) {
+        char *username = cJSON_GetObjectItem(settings_control->settings_ptr, "username")->valuestring;
+        char *password = cJSON_GetObjectItem(settings_control->settings_ptr, "password")->valuestring;
+
+        ESP_ERROR_CHECK( esp_wifi_sta_wpa2_ent_set_username( (uint8_t *)username, strlen(username)) );
+        ESP_ERROR_CHECK( esp_wifi_sta_wpa2_ent_set_password( (uint8_t *)password, strlen(password)) );
+        ESP_ERROR_CHECK( esp_wifi_sta_wpa2_ent_enable() );
+    } else {
+        memcpy(wifi_config.sta.password, cJSON_GetObjectItem(settings_control->settings_ptr, "password")->valuestring, strlen(cJSON_GetObjectItem(settings_control->settings_ptr, "password")->valuestring));    
+    }
+
     ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_set_country_code(country, true));
     ESP_ERROR_CHECK(esp_wifi_set_protocol(ESP_IF_WIFI_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR));
     ESP_ERROR_CHECK(esp_wifi_set_bandwidth(ESP_IF_WIFI_STA, WIFI_BW_HT40));
+
+    // Set url for websocket configuraion
+    websocket_cfg.uri = cJSON_GetObjectItem(settings_control->settings_ptr, "url")->valuestring;
+
     ESP_ERROR_CHECK(esp_wifi_start());
 
     wifi_initialized = true;

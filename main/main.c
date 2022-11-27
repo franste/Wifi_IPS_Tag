@@ -25,6 +25,33 @@
 #define MIN_FTM_RESULTS 1
 #define FACTOR_us_TO_s 1000000
 
+#if CONFIG_PRODUCTION_MODE
+    #define STA_DEFAULT_SSID            CONFIG_WIP_PRODUCTION_STA_SSID
+    #ifdef CONFIG_WIP_WIP_PRODUCTION_STA_WPA_ENTERPRISE
+        #define STA_DEFAULT_USERNAME    CONFIG_WIP_DEVELOPMENT_PRODUCTION_STA_USERNAME
+    #endif
+    #define STA_DEFAULT_PASS            CONFIG_WIP_PRODUCTION_STA_PASSWORD
+    #define STA_DEFAULT_CHANNEL         CONFIG_WIP_PRODUCTION_STA_CHANNEL
+    #define DEFAULT_SERVER_URL          CONFIG_WIP_PRODUCTION_STA_SERVER_URL
+
+#elif CONFIG_DEVELOPMENT_MODE_FACTORY
+    #define STA_DEFAULT_SSID            CONFIG_WIP_DEVELOPMENT_FACTORY_STA_SSID
+    #ifdef CONFIG_WIP_WIP_DEVELOPMENT_FACTORY_STA_WPA_ENTERPRISE
+        #define STA_DEFAULT_USERNAME    CONFIG_WIP_DEVELOPMENT_FACTORY_STA_USERNAME
+    #endif
+    #define STA_DEFAULT_PASS            CONFIG_WIP_DEVELOPMENT_FACTORY_STA_PASSWORD
+    #define STA_DEFAULT_CHANNEL         CONFIG_WIP_DEVELOPMENT_FACTORY_STA_CHANNEL
+    #define DEFAULT_SERVER_URL          CONFIG_WIP_DEVELOPMENT_FACTORY_STA_SERVER_URL
+
+#elif CONFIG_DEVELOPMENT_MODE_LAB
+    #define STA_DEFAULT_SSID            CONFIG_WIP_DEVELOPMENT_LAB_STA_SSID
+    #ifdef CONFIG_WIP_WIP_DEVELOPMENT_LAB_STA_WPA_ENTERPRISE
+        #define STA_DEFAULT_USERNAME    CONFIG_WIP_DEVELOPMENT_LAB_STA_USERNAME
+    #endif
+    #define STA_DEFAULT_PASS            CONFIG_WIP_DEVELOPMENT_LAB_STA_PASSWORD
+    #define STA_DEFAULT_CHANNEL         CONFIG_WIP_DEVELOPMENT_LAB_STA_CHANNEL
+    #define DEFAULT_SERVER_URL          CONFIG_WIP_DEVELOPMENT_LAB_STA_SERVER_URL
+#endif    
 
 static bool sensor_bmp390 = SENSOR_BMP390;
 
@@ -41,10 +68,12 @@ static control_t control = {
 // Default settings for the device
 static cJSON* useDefaultSettings(void) {
     cJSON *settings_json = cJSON_CreateObject();
-    cJSON_AddStringToObject(settings_json, "url", CONFIG_DEV_SERVER_URL);
-    cJSON_AddStringToObject(settings_json, "ssid", CONFIG_DEV_WIFI_SSID);
-    cJSON_AddStringToObject(settings_json, "password", CONFIG_DEV_WIFI_PASSWORD);
-    cJSON_AddStringToObject(settings_json, "username", CONFIG_DEV_WIFI_USERNAME);
+    cJSON_AddStringToObject(settings_json, "url", DEFAULT_SERVER_URL);
+    cJSON_AddStringToObject(settings_json, "ssid", STA_DEFAULT_SSID);
+    cJSON_AddStringToObject(settings_json, "password", STA_DEFAULT_PASS);
+    #ifdef STA_DEFAULT_USERNAME
+        cJSON_AddStringToObject(settings_json, "username", STA_DEFAULT_USERNAME);
+    #endif
     cJSON_AddNumberToObject(settings_json, "interval", 0); // 0 = send data as soon as possible (seconds)
     cJSON_AddNumberToObject(settings_json, "log", ESP_LOG_INFO); // 0 = no logging, 1 = error, 2 = warning, 3 = info, 4 = debug
     cJSON_AddBoolToObject(settings_json, "repl", cJSON_True);
@@ -54,7 +83,9 @@ static cJSON* useDefaultSettings(void) {
 
 void main_task(void *pvParameter)
 {
+
     do {
+        int start = esp_timer_get_time();
         /* Scanning all channels*/
         scanResult_t scanResult = wifiScanAllChannels();
         if (scanResult.numOfScannedAP > 0) {
@@ -113,6 +144,15 @@ void main_task(void *pvParameter)
                     break;
                 }
             }
+
+            // Free memory from results
+            if (result.ftmResultsList != NULL) {
+                free(result.ftmResultsList);
+                result.ftmResultsList = NULL;
+                result.numOfResults = 0;
+                result.numOfFtmResponders = 0;
+            }
+
             if (control.run_once) ESP_LOGI("main", "Task finished");
             else ESP_LOGI("main", "No more FTM results, WIFI scan ALL channels now");
 
@@ -133,6 +173,11 @@ void main_task(void *pvParameter)
             scanResult.uniqueChannelCount = 0;
         }
 
+        // Statistics for debugging
+        int end = esp_timer_get_time();
+        int heap = esp_get_free_heap_size();
+        int min_heap = esp_get_minimum_free_heap_size();
+        ESP_LOGI("main", "Loop took %d ms heapsize: %d min heap: %d", (end - start) / 1000, heap, min_heap);
     } while (!control.run_once);
 
     // Task completed
@@ -205,10 +250,7 @@ void app_main(void)
 
 
     // Join Ap
-    joinAP(
-        cJSON_GetObjectItemCaseSensitive(control.settings_ptr, "ssid")->valuestring, 
-        cJSON_GetObjectItemCaseSensitive(control.settings_ptr, "password")->valuestring
-    );
+    joinAP();
 
     // Start the main task
     xTaskCreatePinnedToCore(&main_task, "tag_task", 4096, NULL, 5, &control.main_task_handle, 1); // Run on core 1
@@ -228,7 +270,7 @@ void app_main(void)
         esp_sleep_enable_timer_wakeup(FACTOR_us_TO_s * 5); // 5 seconds
     }
 
-    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH,   ESP_PD_OPTION_AUTO);
+    //esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH,   ESP_PD_OPTION_AUTO);
     //esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_AUTO);
     //esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_AUTO);
     esp_sleep_pd_config(ESP_PD_DOMAIN_XTAL,         ESP_PD_OPTION_AUTO);
@@ -236,7 +278,7 @@ void app_main(void)
     // Debugging
     int heap = esp_get_free_heap_size();
     int min_heap = esp_get_minimum_free_heap_size();
-    ESP_LOGE("MAIN", "Free heap: %d, min heap: %d", heap, min_heap);
+    ESP_LOGI("MAIN", "Free heap: %d, min heap: %d", heap, min_heap);
     vTaskDelay(1000 / portTICK_PERIOD_MS);
     esp_deep_sleep_start();  // Go to sleep
 }

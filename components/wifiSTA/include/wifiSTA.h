@@ -59,7 +59,7 @@ esp_err_t send_to_server(char *payload);
 void send_http_post(const char *url, char *payload);
 void wifi_csi_init();
 csi_result_list_t get_csi_results();
-esp_err_t joinAP( char *ssid, char *password );
+esp_err_t joinAP();
 esp_err_t wifiStaDeInit();
 
 /**
