@@ -111,13 +111,15 @@ static void websocket_data_handler(cJSON *data_json_ptr) {
     
         if(cJSON_HasObjectItem(data_json_ptr, "settings")) {
             cJSON *settings = cJSON_GetObjectItem(data_json_ptr, "settings");
-            if (settings != NULL) {
+            if (settings != NULL && cJSON_IsObject(settings) )
+            {
                 cJSON *url = cJSON_GetObjectItemCaseSensitive(settings, "url");
                 cJSON *ssid = cJSON_GetObjectItemCaseSensitive(settings, "ssid");
                 cJSON *password = cJSON_GetObjectItemCaseSensitive(settings, "password");
                 cJSON *username = cJSON_GetObjectItemCaseSensitive(settings, "username");
                 cJSON *interval = cJSON_GetObjectItemCaseSensitive(settings, "interval");
                 cJSON *log = cJSON_GetObjectItemCaseSensitive(settings, "log");
+                cJSON *repl = cJSON_GetObjectItemCaseSensitive(settings, "repl");
                 
                 //Url
                 if (cJSON_IsString(url) && (url->valuestring != NULL)) {
@@ -160,7 +162,7 @@ static void websocket_data_handler(cJSON *data_json_ptr) {
                     }
                 }
                 //Interval
-                if (cJSON_IsNumber(interval)) {
+                if (cJSON_IsNumber(interval) ) {
                     cJSON *old_interval = cJSON_GetObjectItemCaseSensitive(settings_control->settings_ptr, "interval");
                     if (cJSON_IsNumber(old_interval) && (interval->valueint != old_interval->valueint)) {
                         update = true;
@@ -208,7 +210,27 @@ static void websocket_data_handler(cJSON *data_json_ptr) {
                             }          
                     }
                 }
-                
+                if (cJSON_IsBool(repl)) {
+                    cJSON *old_repl = cJSON_GetObjectItemCaseSensitive(settings_control->settings_ptr, "repl");
+                    if (cJSON_IsBool(old_repl) && (cJSON_IsBool(repl))) {  // if both are bool
+                        if (cJSON_IsTrue(repl) != cJSON_IsTrue(old_repl)) { // if they are not equal
+                            update = true;
+                            cJSON_ReplaceItemInObject(settings_control->settings_ptr, "repl", cJSON_CreateBool(cJSON_IsTrue(repl)));
+                        }
+                    }
+                }
+            } else if (settings != NULL && cJSON_IsString(settings)) {
+                if (strcmp(settings->valuestring, "current") == 0) {
+                    // send current settings
+                    if (settings_control->settings_ptr != NULL && esp_websocket_client_is_connected(ws_client)) {
+                        char *settings_str = cJSON_PrintUnformatted(settings_control->settings_ptr);
+                        if (settings_str != NULL) {
+                            esp_websocket_client_send_text(ws_client, settings_str, strlen(settings_str), portMAX_DELAY);
+                            free(settings_str);
+                        }
+                    }
+
+                }
             }
         }
         if (update) {
