@@ -934,8 +934,8 @@ void wifi_csi_init()
 
 esp_err_t joinAP()
 {
-    ESP_ERROR_CHECK(esp_wifi_set_channel(1, WIFI_SECOND_CHAN_ABOVE));   // Dosent seem to be able to force bandwidth to 40mhz, so FTM is only 20mhz
-    ESP_ERROR_CHECK(esp_wifi_set_bandwidth(ESP_IF_WIFI_STA, WIFI_BW_HT40));
+    //ESP_ERROR_CHECK(esp_wifi_set_channel(1, WIFI_SECOND_CHAN_ABOVE));   // Dosent seem to be able to force bandwidth to 40mhz, so FTM is only 20mhz
+    //ESP_ERROR_CHECK(esp_wifi_set_bandwidth(ESP_IF_WIFI_STA, WIFI_BW_HT40));
     ESP_ERROR_CHECK(esp_wifi_set_config(ESP_MAC_WIFI_STA, &wifi_config));
     esp_err_t err = esp_wifi_connect();
     if (err != ESP_OK) {
