@@ -557,6 +557,9 @@ esp_err_t send_to_server(char *payload) {
         return ESP_OK;
     } else {
         ESP_LOGE(WIFI, "Websocket not connected");
+        if (settings_control->settings_ptr != NULL) {
+            joinAP();
+        }
         return ESP_FAIL;
     }
 }
@@ -905,9 +908,7 @@ csi_result_list_t get_csi_results() {
 
 void wifi_csi_init()
 {
-    
-
-    /**< default config */
+    /* default config */
     wifi_csi_config_t csi_config = {
         .lltf_en = true,
         .htltf_en = true,
