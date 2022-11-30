@@ -955,7 +955,7 @@ esp_err_t joinAP()
                 char message[30];
                 uint8_t mac[MAC_ADDRESS_LENGTH];
                 esp_wifi_get_mac(ESP_IF_WIFI_STA, mac);
-                sprintf(message, "{\"Device\":\""MACSTR"\"}", MAC2STR(mac));
+                sprintf(message, "{\"Device\":\""MACSTR"\",\"Type\":\"Tag\"}", MAC2STR(mac));
                 esp_websocket_client_send_text(ws_client, message, strlen(message), portMAX_DELAY);
             }
             return ESP_OK;
