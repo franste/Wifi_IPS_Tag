@@ -1017,6 +1017,12 @@ esp_err_t wifiStaInit(control_t *control)
     memcpy(wifi_config.sta.ssid, cJSON_GetObjectItem(settings_control->settings_ptr, "ssid")->valuestring, strlen(cJSON_GetObjectItem(settings_control->settings_ptr, "ssid")->valuestring));
     
     if (cJSON_HasObjectItem(settings_control->settings_ptr, "username")) {
+        #ifdef CONFIG_DEVELOPMENT_MODE_FACTORY || CONFIG_DEVELOPMENT_MODE_LAB
+            ESP_LOGE("Test", "username: %s password: %s", 
+                cJSON_GetObjectItem(settings_control->settings_ptr, "username")->valuestring,
+                cJSON_GetObjectItem(settings_control->settings_ptr, "password")->valuestring
+            );
+        #endif
         char *username = cJSON_GetObjectItem(settings_control->settings_ptr, "username")->valuestring;
         char *password = cJSON_GetObjectItem(settings_control->settings_ptr, "password")->valuestring;
 

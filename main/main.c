@@ -21,14 +21,15 @@
 
 //#define PRODUCTION true
 #define SENSOR_BMP390 true
+#define RESET_SETTINGS false
 #define MAC_ADDRESS_LENGTH 6
 #define MIN_FTM_RESULTS 1
 #define FACTOR_us_TO_s 1000000
 
 #if CONFIG_PRODUCTION_MODE
     #define STA_DEFAULT_SSID            CONFIG_WIP_PRODUCTION_STA_SSID
-    #ifdef CONFIG_WIP_WIP_PRODUCTION_STA_WPA_ENTERPRISE
-        #define STA_DEFAULT_USERNAME    CONFIG_WIP_DEVELOPMENT_PRODUCTION_STA_USERNAME
+    #ifdef CONFIG_WIP_PRODUCTION_STA_WPA_ENTERPRISE
+        #define STA_DEFAULT_USERNAME    CONFIG_WIP_PRODUCTION_STA_USERNAME
     #endif
     #define STA_DEFAULT_PASS            CONFIG_WIP_PRODUCTION_STA_PASSWORD
     #define STA_DEFAULT_CHANNEL         CONFIG_WIP_PRODUCTION_STA_CHANNEL
@@ -36,7 +37,7 @@
 
 #elif CONFIG_DEVELOPMENT_MODE_FACTORY
     #define STA_DEFAULT_SSID            CONFIG_WIP_DEVELOPMENT_FACTORY_STA_SSID
-    #ifdef CONFIG_WIP_WIP_DEVELOPMENT_FACTORY_STA_WPA_ENTERPRISE
+    #ifdef CONFIG_WIP_DEVELOPMENT_FACTORY_STA_WPA_ENTERPRISE
         #define STA_DEFAULT_USERNAME    CONFIG_WIP_DEVELOPMENT_FACTORY_STA_USERNAME
     #endif
     #define STA_DEFAULT_PASS            CONFIG_WIP_DEVELOPMENT_FACTORY_STA_PASSWORD
@@ -45,7 +46,7 @@
 
 #elif CONFIG_DEVELOPMENT_MODE_LAB
     #define STA_DEFAULT_SSID            CONFIG_WIP_DEVELOPMENT_LAB_STA_SSID
-    #ifdef CONFIG_WIP_WIP_DEVELOPMENT_LAB_STA_WPA_ENTERPRISE
+    #ifdef CONFIG_WIP_DEVELOPMENT_LAB_STA_WPA_ENTERPRISE
         #define STA_DEFAULT_USERNAME    CONFIG_WIP_DEVELOPMENT_LAB_STA_USERNAME
     #endif
     #define STA_DEFAULT_PASS            CONFIG_WIP_DEVELOPMENT_LAB_STA_PASSWORD
@@ -178,6 +179,7 @@ void main_task(void *pvParameter)
         int heap = esp_get_free_heap_size();
         int min_heap = esp_get_minimum_free_heap_size();
         ESP_LOGI("main", "Loop took %d ms heapsize: %d min heap: %d", (end - start) / 1000, heap, min_heap);
+        if ((end -start) / 1000 < 100 ) vTaskDelay(2000 / portTICK_PERIOD_MS); //  reduce if connecting to AP is locking wifi
     } while (!control.run_once);
 
     // Task completed
@@ -205,6 +207,11 @@ void app_main(void)
         ESP_LOGE("main", "No settings found, using default settings");
         control.settings_ptr = useDefaultSettings();
     }
+    if (RESET_SETTINGS) { // reset for debugging
+        ESP_LOGE("main", "Resetting settings");
+        control.settings_ptr = useDefaultSettings();
+    }
+
     control.interval = cJSON_GetObjectItemCaseSensitive(control.settings_ptr, "interval")->valueint;
     
     // set the interval before deep sleep. If 0, no deep sleep
