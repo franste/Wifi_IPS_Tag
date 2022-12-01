@@ -350,7 +350,6 @@ static void eventHandler(void *arg, esp_event_base_t event_base,
         ws_client = esp_websocket_client_init(&websocket_cfg);
         esp_websocket_register_events(ws_client, WEBSOCKET_EVENT_ANY, websocket_event_handler, (void *)ws_client);
         esp_websocket_client_start(ws_client);
-
     }
     else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_LOST_IP) {
         if (esp_websocket_client_is_connected(ws_client)) {
@@ -1017,14 +1016,11 @@ esp_err_t wifiStaInit(control_t *control)
     memcpy(wifi_config.sta.ssid, cJSON_GetObjectItem(settings_control->settings_ptr, "ssid")->valuestring, strlen(cJSON_GetObjectItem(settings_control->settings_ptr, "ssid")->valuestring));
     
     if (cJSON_HasObjectItem(settings_control->settings_ptr, "username")) {
-        #ifdef CONFIG_DEVELOPMENT_MODE_FACTORY || CONFIG_DEVELOPMENT_MODE_LAB
-            ESP_LOGE("Test", "username: %s password: %s", 
-                cJSON_GetObjectItem(settings_control->settings_ptr, "username")->valuestring,
-                cJSON_GetObjectItem(settings_control->settings_ptr, "password")->valuestring
-            );
-        #endif
         char *username = cJSON_GetObjectItem(settings_control->settings_ptr, "username")->valuestring;
         char *password = cJSON_GetObjectItem(settings_control->settings_ptr, "password")->valuestring;
+        #if defined(CONFIG_DEVELOPMENT_FACTORY_MODE) || defined(CONFIG_DEVELOPMENT_LAB_MODE) 
+            ESP_LOGE("TEST", "Username: %s Password: %s", username, password);
+        #endif
 
         ESP_ERROR_CHECK( esp_wifi_sta_wpa2_ent_set_username( (uint8_t *)username, strlen(username)) );
         ESP_ERROR_CHECK( esp_wifi_sta_wpa2_ent_set_password( (uint8_t *)password, strlen(password)) );

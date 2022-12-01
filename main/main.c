@@ -21,7 +21,7 @@
 
 //#define PRODUCTION true
 #define SENSOR_BMP390 true
-#define RESET_SETTINGS false
+#define RESET_SETTINGS true
 #define MAC_ADDRESS_LENGTH 6
 #define MIN_FTM_RESULTS 1
 #define FACTOR_us_TO_s 1000000
