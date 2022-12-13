@@ -58,7 +58,7 @@ static bool sensor_bmp390 = SENSOR_BMP390;
 
 static control_t control = {
     .settings_ptr = NULL,
-    .run_once = false,
+    .reboot = false,
     .main_task_handle = NULL,
     .task_event_group = NULL,
     .TASK_COMPLETED_BIT = BIT0,
@@ -75,10 +75,9 @@ static cJSON* useDefaultSettings(void) {
     #ifdef STA_DEFAULT_USERNAME
         cJSON_AddStringToObject(settings_json, "username", STA_DEFAULT_USERNAME);
     #endif
-    cJSON_AddNumberToObject(settings_json, "interval", 0); // 0 = send data as soon as possible (seconds)
+    cJSON_AddNumberToObject(settings_json, "interval", 1); // 0 = send data as soon as possible (minutes)
     cJSON_AddNumberToObject(settings_json, "log", ESP_LOG_INFO); // 0 = no logging, 1 = error, 2 = warning, 3 = info, 4 = debug
-    cJSON_AddBoolToObject(settings_json, "repl", cJSON_True);
-
+    cJSON_AddBoolToObject(settings_json, "repl", false); // Enable REPL
     return settings_json;
 }
 
@@ -108,7 +107,7 @@ void main_task(void *pvParameter)
             free(csi_result_list.list);
 
             /* Scanning only channels found in all scan*/
-            while (result.numOfFtmResponders >=  MIN_FTM_RESULTS && !control.run_once) {
+            while (result.numOfFtmResponders >=  MIN_FTM_RESULTS && !control.reboot) {
                 vTaskDelay(10 / portTICK_PERIOD_MS); // Wait for subprocessing to finish, if it is running.
                 int start = esp_timer_get_time();
                 if (result.ftmResultsList != NULL) {
@@ -154,7 +153,7 @@ void main_task(void *pvParameter)
                 result.numOfFtmResponders = 0;
             }
 
-            if (control.run_once) ESP_LOGI("main", "Task finished");
+            if (control.reboot) ESP_LOGI("main", "Task finished");
             else ESP_LOGI("main", "No more FTM results, WIFI scan ALL channels now");
 
         } else {
@@ -180,7 +179,7 @@ void main_task(void *pvParameter)
         int min_heap = esp_get_minimum_free_heap_size();
         ESP_LOGI("main", "Loop took %d ms heapsize: %d min heap: %d", (end - start) / 1000, heap, min_heap);
         if ((end -start) / 1000 < 100 ) vTaskDelay(2000 / portTICK_PERIOD_MS); //  reduce if connecting to AP is locking wifi
-    } while (!control.run_once);
+    } while (!control.reboot);
 
     // Task completed
     xEventGroupWaitBits(control.task_event_group, control.SETTINGS_NOT_UPDATING_BIT, false, true, portMAX_DELAY);
@@ -198,25 +197,27 @@ void app_main(void)
     }
 
     // Initialize the control struct
-    control.settings_ptr = readSettings(); // load settings from NVS
-    control.settings_mutex = xSemaphoreCreateMutex();
-    control.task_event_group = xEventGroupCreate();
-     
-     // If no settings are found, uce default settings
-    if (control.settings_ptr == NULL) {
-        ESP_LOGE("main", "No settings found, using default settings");
-        control.settings_ptr = useDefaultSettings();
-    }
     if (RESET_SETTINGS) { // reset for debugging
         ESP_LOGE("main", "Resetting settings");
         control.settings_ptr = useDefaultSettings();
+    } else {
+        control.settings_ptr = readSettings(); // load settings from NVS
     }
+     // If no settings are found, uce default settings
+    if (control.settings_ptr == NULL)  {
+        ESP_LOGE("main", "No settings found, using default settings");
+        control.settings_ptr = useDefaultSettings();
+    }
+
+    control.settings_mutex = xSemaphoreCreateMutex();
+    control.task_event_group = xEventGroupCreate();
+     
 
     control.interval = cJSON_GetObjectItemCaseSensitive(control.settings_ptr, "interval")->valueint;
     
     // set the interval before deep sleep. If 0, no deep sleep
-    if (control.interval > 0) control.run_once = true; // Run task only once
-    else control.run_once = false; // Run task continuously
+    if (control.interval > 0) control.reboot = true; // Run task only once
+    else control.reboot = false; // Run task continuously
 
     xEventGroupClearBits(control.task_event_group, control.TASK_COMPLETED_BIT);
     xEventGroupSetBits(control.task_event_group, control.SETTINGS_NOT_UPDATING_BIT);
@@ -245,9 +246,10 @@ void app_main(void)
     // Initialize the CSI
     wifi_csi_init();
 
+
     //Start the REPL
     cJSON *repl_json = cJSON_GetObjectItemCaseSensitive(control.settings_ptr, "repl");
-    if (cJSON_IsBool(repl_json) && cJSON_IsTrue(repl_json)) {
+    if (cJSON_IsTrue(repl_json) == 1 ){
         ESP_LOGE("main", "Starting REPL");
         xEventGroupClearBits(control.task_event_group, control.SETTINGS_NOT_UPDATING_BIT);
         repl(&control);

@@ -223,10 +223,26 @@ static void websocket_data_handler(cJSON *data_json_ptr) {
                 if (strcmp(settings->valuestring, "current") == 0) {
                     // send current settings
                     if (settings_control->settings_ptr != NULL && esp_websocket_client_is_connected(ws_client)) {
-                        char *settings_str = cJSON_PrintUnformatted(settings_control->settings_ptr);
+
+                        // Wrap settings in a JSON object
+                        cJSON *wrapper = cJSON_CreateObject();
+                        cJSON_AddItemToObject(wrapper, "settings", settings_control->settings_ptr);
+                        
+                        // Add MAC address
+                        uint8_t mac[MAC_ADDRESS_LENGTH];
+                        esp_wifi_get_mac(ESP_IF_WIFI_STA, mac);
+                        char macStr[MAC_ADDRESS_LENGTH * 2 + 1];
+                        sprintf(macStr, "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+                        cJSON_AddStringToObject(wrapper, "device", macStr);
+
+                        // Add type
+                        cJSON_AddStringToObject(wrapper, "type", "SETTINGS");
+
+                        char *settings_str = cJSON_PrintUnformatted(wrapper);
                         if (settings_str != NULL) {
                             esp_websocket_client_send_text(ws_client, settings_str, strlen(settings_str), portMAX_DELAY);
                             free(settings_str);
+                            cJSON_Delete(wrapper);
                         }
                     }
 
@@ -238,12 +254,12 @@ static void websocket_data_handler(cJSON *data_json_ptr) {
             saveSettings(settings_control->settings_ptr);
             if (esp_websocket_client_is_connected(ws_client)) {
                 ESP_LOGI(WS, "Comfirming settings update");
-                char msg[] = "{\"message\": \"Settings updated\"}";
+                char msg[] = "{\"type\":\"MESSAGE\"\"message\": \"Settings updated\"}";
                 esp_websocket_client_send_text(ws_client, msg, strlen(msg), portMAX_DELAY);
             }
             cJSON_Delete(data_json_ptr);
             settings_control->interval = 0; // Short sleep for new settings to take effect.
-            settings_control->run_once = true; // Task run once so new settings can take effect.
+            settings_control->reboot = true; // Task run once so new settings can take effect.
         } else {
             cJSON_Delete(data_json_ptr);
         }
@@ -951,10 +967,10 @@ esp_err_t joinAP()
         if (bits & WS_CONNECTED_BIT) {
             if (esp_websocket_client_is_connected(ws_client)) {
                 ESP_LOGI(WS, "Sending mac address to server");
-                char message[30];
+                char message[70];
                 uint8_t mac[MAC_ADDRESS_LENGTH];
                 esp_wifi_get_mac(ESP_IF_WIFI_STA, mac);
-                sprintf(message, "{\"Device\":\""MACSTR"\",\"Type\":\"Tag\"}", MAC2STR(mac));
+                sprintf(message, "{\"type\":\"REGISTRATION\",\"device\":\""MACSTR"\",\"isAnchor\":true}", MAC2STR(mac));
                 esp_websocket_client_send_text(ws_client, message, strlen(message), portMAX_DELAY);
             }
             return ESP_OK;

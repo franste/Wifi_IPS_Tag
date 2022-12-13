@@ -10,7 +10,7 @@
 typedef struct control_s{
     cJSON *settings_ptr;
     SemaphoreHandle_t settings_mutex;
-    bool run_once;
+    bool reboot;
     TaskHandle_t main_task_handle;
     EventGroupHandle_t task_event_group;
     const int SETTINGS_NOT_UPDATING_BIT;
