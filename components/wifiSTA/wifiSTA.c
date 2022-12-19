@@ -254,7 +254,7 @@ static void websocket_data_handler(cJSON *data_json_ptr) {
             saveSettings(settings_control->settings_ptr);
             if (esp_websocket_client_is_connected(ws_client)) {
                 ESP_LOGI(WS, "Comfirming settings update");
-                char msg[] = "{\"type\":\"MESSAGE\"\"message\": \"Settings updated\"}";
+                char msg[] = "{\"type\":\"MESSAGE\",\"message\": \"Settings updated\"}";
                 esp_websocket_client_send_text(ws_client, msg, strlen(msg), portMAX_DELAY);
             }
             cJSON_Delete(data_json_ptr);
